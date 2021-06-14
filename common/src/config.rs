@@ -1,6 +1,7 @@
 // ************ Switches **************
 // length
 pub const ENABLE_INPUT_LEN_EXPLORATION: bool = true;
+pub const ENABLE_INPUT_AMP_EXPLORATION: bool = true;
 pub const ENABLE_RANDOM_LEN: bool = false;
 pub const ENABLE_MICRO_RANDOM_LEN: bool = true;
 
@@ -17,9 +18,9 @@ pub const BRANCHES_SIZE: usize = 1 << MAP_SIZE_POW2;
 
 // executor.rs:
 pub const TMOUT_SKIP: usize = 3;
-pub const TIME_LIMIT: u64 = 1;
-pub const MEM_LIMIT: u64 = 200; // MB
-pub const TIME_LIMIT_TRACK: u64 = 12;
+pub const TIME_LIMIT: u64 = 5;
+pub const MEM_LIMIT: u64 = 1024; // MB
+pub const TIME_LIMIT_TRACK: u64 = 60;
 pub const MEM_LIMIT_TRACK: u64 = 0;
 pub const LONG_FUZZ_TIME: usize = 8;
 pub const MAX_INVARIABLE_NUM: usize = 16;

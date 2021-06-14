@@ -18,6 +18,7 @@ use crate::{bind_cpu, branches, check_dep, command, depot, executor, fuzz_loop, 
 use ctrlc;
 use libc;
 use pretty_env_logger;
+use std::fs::File;
 
 pub fn fuzz_main(
     mode: &str,
@@ -33,8 +34,8 @@ pub fn fuzz_main(
     enable_afl: bool,
     enable_exploitation: bool,
     cfg_input_file: &str,
-    sanopt_target: Option<&str>,
     directed_only: bool,
+    target_addr: &str,
 ) {
     pretty_env_logger::init();
 
@@ -53,8 +54,8 @@ pub fn fuzz_main(
         enable_afl,
         enable_exploitation,
         cfg_input_file,
-        sanopt_target,
         directed_only,
+        target_addr,
     );
     info!("{:?}", command_option);
 
@@ -100,15 +101,19 @@ pub fn fuzz_main(
         &stats,
     );
 
-    let log_file = match fs::File::create(angora_out_dir.join(defs::ANGORA_LOG_FILE)) {
+    let mut log_file_writer = match csv::Writer::from_path(defs::ANGORA_LOG_FILE) {
         Ok(a) => a,
         Err(e) => {
             error!("FATAL: Could not create log file: {:?}", e);
             panic!();
         }
     };
+    {
+        let s = stats.read().expect("Could not read from stats.");
+        log_file_writer.write_record(s.mini_log_hdr()).expect("Could not write minilog.");
+    }
     main_thread_sync_and_log(
-        log_file,
+        log_file_writer,
         out_dir,
         sync_afl,
         running.clone(),
@@ -227,7 +232,7 @@ fn init_cpus_and_run_fuzzing_threads(
 }
 
 fn main_thread_sync_and_log(
-    mut log_file: fs::File,
+    mut log_file_writer: csv::Writer<File>,
     out_dir: &str,
     sync_afl: bool,
     running: Arc<AtomicBool>,
@@ -244,16 +249,16 @@ fn main_thread_sync_and_log(
         depot::sync_afl(executor, running.clone(), sync_dir, &mut synced_ids);
     }
     let mut sync_counter = 1;
-    show_stats(&mut log_file, depot, global_branches, stats);
+    show_stats(&mut log_file_writer, depot, global_branches, stats);
     while running.load(Ordering::SeqCst) {
-        thread::sleep(time::Duration::from_secs(5));
+        thread::sleep(time::Duration::from_secs(1)); //TODO: Increase back to 5 for final testing
         sync_counter -= 1;
         if sync_afl && sync_counter <= 0 {
             depot::sync_afl(executor, running.clone(), sync_dir, &mut synced_ids);
             sync_counter = 12;
         }
 
-        show_stats(&mut log_file, depot, global_branches, stats);
+        show_stats(&mut log_file_writer, depot, global_branches, stats);
         if Arc::strong_count(&child_count) == 1 {
             let s = stats.read().unwrap();
             let cur_explore_num = s.get_explore_num();

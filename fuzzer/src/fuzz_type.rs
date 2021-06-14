@@ -1,16 +1,17 @@
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize)]
 pub enum FuzzType {
     ExploreFuzz,
     ExploitFuzz,
     CmpFnFuzz,
     LenFuzz,
     AFLFuzz,
+    AmpFuzz,
     OtherFuzz,
 }
 
 pub const FUZZ_TYPE_NUM: usize = FuzzType::OtherFuzz as usize + 1;
 static FUZZ_TYPE_NAME: [&str; FUZZ_TYPE_NUM] =
-    ["Explore", "Exploit", "CmpFn", "Len", "AFL", "Other"];
+    ["Explore", "Exploit", "CmpFn", "Len", "AFL", "Amp", "Other"];
 
 impl Default for FuzzType {
     fn default() -> Self {

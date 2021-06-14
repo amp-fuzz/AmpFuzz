@@ -68,7 +68,7 @@ public:
     unsigned NewSize = Storage.size() - 1;
     if (NewSize) {
       // Move the slot at the end to the beginning.
-      if (isPodLike<T>::value)
+      if (is_trivially_copyable<T>::value)
         Storage[0] = Storage[NewSize];
       else
         std::swap(Storage[0], Storage[NewSize]);
@@ -629,8 +629,8 @@ void FunctionDifferenceEngine::runBlockDiff(BasicBlock::iterator LStart,
   // If the terminators have different kinds, but one is an invoke and the
   // other is an unconditional branch immediately following a call, unify
   // the results and the destinations.
-  TerminatorInst *LTerm = LStart->getParent()->getTerminator();
-  TerminatorInst *RTerm = RStart->getParent()->getTerminator();
+  Instruction *LTerm = LStart->getParent()->getTerminator();
+  Instruction *RTerm = RStart->getParent()->getTerminator();
   if (isa<BranchInst>(LTerm) && isa<InvokeInst>(RTerm)) {
     if (cast<BranchInst>(LTerm)->isConditional()) return;
     BasicBlock::iterator I = LTerm->getIterator();

@@ -23,7 +23,7 @@ public:
   /// Returns whether either this function or its source file are listed in the
   /// given category.
   bool isIn(const Function &F, StringRef Category) const {
-    return isIn(*F.getParent(), Category) ||
+    return (F.getParent() != nullptr && isIn(*F.getParent(), Category)) ||
            SCL_INSECTION(SCL, "angora", "fun", F.getName(), Category);
   }
 

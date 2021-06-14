@@ -32,7 +32,7 @@ pub struct CondStmtMb {
 
 impl PartialEq for CondStmtBase {
     fn eq(&self, other: &CondStmtBase) -> bool {
-        self.cmpid == other.cmpid && self.context == other.context && self.order == other.order
+        self.cmpid == other.cmpid && self.context == other.context && self.order == other.order && self.op == other.op
     }
 }
 

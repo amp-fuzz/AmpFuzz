@@ -233,6 +233,7 @@ fun:ctime_r=custom
 fun:inet_pton=custom
 fun:localtime_r=custom
 fun:memcpy=custom
+fun:__memcpy_chk=custom
 fun:memset=custom
 fun:strcpy=custom
 fun:stpcpy=custom
@@ -254,6 +255,7 @@ fun:strcmp=custom
 fun:strlen=custom
 fun:strncasecmp=custom
 fun:strncmp=custom
+fun:bcmp=custom
 fun:strrchr=custom
 fun:strstr=custom
 

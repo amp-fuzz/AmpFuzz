@@ -42,6 +42,7 @@ namespace __dfsan {
 void InitializeInterceptors();
 
 inline dfsan_label *shadow_for(void *ptr) {
+  // shift by 2 == multiply by 4 (= ShadowWidthBytes in DFSanPass.cc)
   return (dfsan_label *) ((((uptr) ptr) & ShadowMask()) << 2);
 }
 

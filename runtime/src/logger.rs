@@ -1,45 +1,62 @@
 use bincode::{deserialize_from, serialize_into};
-use std::{collections::HashMap, env, fs, io, path::Path};
+use std::{collections::HashMap, env, fs, io, path::Path, os::unix::net::UnixStream, time::Duration};
 
 use crate::{len_label, tag_set_wrap};
-use angora_common::{cond_stmt_base::CondStmtBase, config, defs, log_data::LogData};
+use angora_common::{cond_stmt_base::CondStmtBase, config, defs, log_data::LogData, log_data::LogMsg};
+use std::io::{Error, Write};
+use std::os::raw::c_int;
+use std::ffi::CString;
+use std::fs::File;
+use std::os::unix::io::{AsRawFd, RawFd};
 
 #[derive(Debug)]
 pub struct Logger {
     data: LogData,
-    fd: Option<fs::File>,
-    order_map: HashMap<(u32, u32), u32>,
+    track_file: Option<File>,
+    order_map: HashMap<(u32, u32), u32>, // (cmpid, context) -> order (= number of hits?)
 }
 
 impl Logger {
     pub fn new() -> Self {
-        // export ANGORA_TRACK_OUTPUT=track.log
-        let fd = match env::var(defs::TRACK_OUTPUT_VAR) {
-            Ok(path) => match fs::File::create(&path) {
-                Ok(f) => Some(f),
-                Err(_) => None,
-            },
-            Err(_) => None,
+        let track_file = match env::var(defs::TRACK_FILE_PATH_VAR) {
+            Ok(track_file_path) => {
+                Some(File::create(track_file_path).unwrap())
+            }
+            Err(E) => { None }
         };
 
         Self {
             data: LogData::new(),
-            fd,
+            track_file,
             order_map: HashMap::new(),
         }
     }
 
+    fn save_internal(&mut self, msg: LogMsg) {
+        if let Some(ref mut track_file) = self.track_file {
+            serialize_into(&mut *track_file, &msg);
+            track_file.flush();
+        }
+    }
+
+
     fn save_tag(&mut self, lb: u32) {
         if lb > 0 {
             let tag = tag_set_wrap::tag_set_find(lb as usize);
-            self.data.tags.entry(lb).or_insert(tag);
+            if !self.data.tags.contains_key(&lb) {
+                let tagclone = tag.clone();
+                self.data.tags.insert(lb, tag);
+                self.save_internal(LogMsg::Tag { lb, tag: tagclone });
+            }
         }
     }
 
     pub fn save_magic_bytes(&mut self, bytes: (Vec<u8>, Vec<u8>)) {
         let i = self.data.cond_list.len();
         if i > 0 {
+            let bytesclone = bytes.clone();
             self.data.magic_bytes.insert(i - 1, bytes);
+            self.save_internal(LogMsg::MagicBytes { i, bytes: bytesclone });
         }
     }
 
@@ -64,51 +81,48 @@ impl Logger {
         let mut order = 0;
 
         // also modify cond to remove len_label information
+        // !! NOTE: this will reduce cond.lb1 and cond.lb2 to their normal-label parts !!
         let len_cond = len_label::get_len_cond(&mut cond);
 
         if cond.op < defs::COND_AFL_OP || cond.op == defs::COND_FN_OP {
+            // !! NOTE: modifies cond.order in place !!
+            // returned order is value by which cond.order was *incremented*,
+            // i.e. old_order = cond.order - order
             order = self.get_order(&mut cond);
         }
         if order <= config::MAX_COND_ORDER {
             self.save_tag(cond.lb1);
             self.save_tag(cond.lb2);
+
             self.data.cond_list.push(cond);
+            self.save_internal(LogMsg::Cond { cond });
 
             if let Some(mut c) = len_cond {
                 c.order = 0x10000 + order; // avoid the same as cond;
+
                 self.data.cond_list.push(c);
+                self.save_internal(LogMsg::Cond { cond: c });
             }
         }
     }
 
-    fn fini(&self) {
-        if let Some(fd) = &self.fd {
-            let mut writer = io::BufWriter::new(fd);
-            serialize_into(&mut writer, &self.data).expect("Could not serialize data.");
+    pub fn save_load(&mut self, path: CString) {
+        if self.data.load_paths.insert(path.clone()) {
+            self.save_internal(LogMsg::Load { path: path });
         }
     }
-}
 
-impl Drop for Logger {
-    fn drop(&mut self) {
-        self.fini();
+    pub fn as_raw_fd(&self) -> Option<c_int> {
+        if let Some(ref track_file) = self.track_file {
+            Some(track_file.as_raw_fd())
+        } else {
+            None
+        }
     }
-}
 
-pub fn get_log_data(path: &Path) -> io::Result<LogData> {
-    let f = fs::File::open(path)?;
-    if f.metadata().unwrap().len() == 0 {
-        return Err(io::Error::new(io::ErrorKind::Other, "Could not find any interesting constraint!, Please make sure taint tracking works or running program correctly."));
+    pub fn flush(&mut self) {
+        if let Some(ref mut track_file) = self.track_file {
+            track_file.flush();
+        }
     }
-    let mut reader = io::BufReader::new(f);
-    match deserialize_from::<&mut io::BufReader<fs::File>, LogData>(&mut reader) {
-        Ok(v) => Ok(v),
-        Err(_) => Err(io::Error::new(io::ErrorKind::Other, "bincode parse error!")),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {}
 }

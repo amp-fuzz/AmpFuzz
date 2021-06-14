@@ -18,6 +18,7 @@ impl<'a> SearchHandler<'a> {
         buf: Vec<u8>,
     ) -> Self {
         executor.local_stats.register(cond);
+        executor.global_stats.write().unwrap().register(cond);
         cond.fuzz_times = cond.fuzz_times + 1;
         Self {
             running,
@@ -49,7 +50,7 @@ impl<'a> SearchHandler<'a> {
         // Skip if it reach max epoch,
         // Like a Round-Robin algorithm,
         // To avoid stuck in some cond too much time.
-        if self.executor.local_stats.num_exec > self.max_times {
+        if self.executor.local_stats.num_exec_round > self.max_times {
             self.skip = true;
         }
     }
@@ -92,6 +93,6 @@ impl<'a> SearchHandler<'a> {
 
 impl<'a> Drop for SearchHandler<'a> {
     fn drop(&mut self) {
-        self.executor.update_log();
+        self.executor.finish_round();
     }
 }

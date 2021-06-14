@@ -200,6 +200,30 @@ SANITIZER_INTERFACE_ATTRIBUTE int __dfsw_strncmp(const char *s1, const char *s2,
   return 0;
 }
 
+SANITIZER_INTERFACE_ATTRIBUTE int __dfsw_bcmp(const unsigned char *s1, const unsigned char *s2,
+                                                 size_t n, dfsan_label s1_label,
+                                                 dfsan_label s2_label,
+                                                 dfsan_label n_label,
+                                                 dfsan_label *ret_label) {
+  if (n == 0) {
+    *ret_label = 0;
+    return 0;
+  }
+
+  for (size_t i = 0;; ++i) {
+    if (s1[i] != s2[i] || i == n - 1) {
+      if (flags().strict_data_dependencies) {
+        *ret_label = 0;
+      } else {
+        *ret_label = dfsan_union(dfsan_read_label(s1, i + 1),
+                                 dfsan_read_label(s2, i + 1));
+      }
+      return s1[i] - s2[i];
+    }
+  }
+  return 0;
+}
+
 SANITIZER_INTERFACE_ATTRIBUTE int __dfsw_strncasecmp(
     const char *s1, const char *s2, size_t n, dfsan_label s1_label,
     dfsan_label s2_label, dfsan_label n_label, dfsan_label *ret_label) {
@@ -267,7 +291,7 @@ void *__dfsw_memcpy(void *dest, const void *src, size_t n,
   return dfsan_memcpy(dest, src, n);
 }
 SANITIZER_INTERFACE_ATTRIBUTE
-void *__dfsw___mempcpy_chk(void *dest, const void *src, size_t n,
+void *__dfsw___memcpy_chk(void *dest, const void *src, size_t n,
                            size_t dst_len, dfsan_label dest_label,
                            dfsan_label src_label, dfsan_label n_label,
                            dfsan_label dst_len_label, dfsan_label *ret_label) {
@@ -740,7 +764,9 @@ int __dfsw_select(int nfds, fd_set *readfds, fd_set *writefds,
   if (exceptfds) {
     dfsan_set_label(0, exceptfds, sizeof(fd_set));
   }
-  dfsan_set_label(0, timeout, sizeof(struct timeval));
+  if (timeout) {
+    dfsan_set_label(0, timeout, sizeof(struct timeval));
+  }
   *ret_label = 0;
   return ret;
 }

@@ -3,6 +3,14 @@ use crate::{branches::GlobalBranches, depot::Depot};
 use colored::*;
 use serde_derive::Serialize;
 use std::sync::Arc;
+use crate::byte_count::{UdpByteCount, AmpByteCount};
+use std::cmp::max;
+use crate::fuzz_type::{FuzzType, get_fuzz_type_name};
+use crate::cond_stmt::CondStmt;
+use crate::branches::PathAmplification;
+use csv::Writer;
+use itertools::Itertools;
+use crate::branches::JsonStr;
 
 #[derive(Default, Serialize)]
 pub struct ChartStats {
@@ -22,10 +30,39 @@ pub struct ChartStats {
     num_hangs: Counter,
     num_crashes: Counter,
     num_targets: Counter,
+    num_amps: Counter,
+
+    best_amp: AmpByteCount,
+    path_amplification: PathAmplification,
 
     fuzz: FuzzStats,
     search: SearchStats,
     state: StateStats,
+    fuzz_type: FuzzType,
+}
+
+// pub fn merge_hashmaps(map1: &mut std::collections::HashMap::<Vec::<(usize, u8)>, AmpByteCount>, map2: &mut std::collections::HashMap::<Vec::<(usize, u8)>, AmpByteCount>) {
+//     for (key, value) in &*map1 {
+//         if map2.contains_key(key) {
+//             let best_path_amp = map2.get_mut(key).unwrap();
+//             if best_path_amp.as_factor() > value.as_factor() {map1[key] = best_path_amp.clone()}
+//         }
+//     }
+//     for (key, value) in &*map2 {
+//         if !map1.contains_key(key) {
+//             map1[key] = value.clone();
+//         }
+//     }
+// }
+
+pub fn merge_hashmaps(map1: &mut PathAmplification, map2: &PathAmplification) {
+    for (path, amp) in &*map2 {
+        map1.entry(path.clone()).and_modify(|old| {
+            if old.as_factor() < amp.as_factor() {
+                *old = amp.clone();
+            }
+        }).or_insert_with(|| amp.clone());
+    }
 }
 
 impl ChartStats {
@@ -35,7 +72,6 @@ impl ChartStats {
 
     pub fn sync_from_local(&mut self, local: &mut LocalStats) {
         self.track_time += local.track_time;
-        self.num_rounds.count();
 
         local.avg_edge_num.sync(&mut self.avg_edge_num);
         local.avg_exec_time.sync(&mut self.avg_exec_time);
@@ -54,8 +90,23 @@ impl ChartStats {
         st.num_crashes += local.num_crashes;
         self.num_crashes += local.num_crashes;
         //self.num_targets += local.num_targets;
+        st.num_amps += local.num_amps;
+        self.num_amps += local.num_amps;
 
+        st.best_amp = max(st.best_amp.clone(), local.best_amp.clone());
+        self.best_amp = max(self.best_amp.clone(), local.best_amp.clone());
+
+        merge_hashmaps(&mut st.path_amplification, &local.path_amplification.clone());
+        merge_hashmaps(&mut self.path_amplification, &local.path_amplification.clone());
         //local.clear();
+    }
+
+    pub fn finish_round(&mut self) {
+        self.num_rounds.count();
+    }
+
+    pub fn register(&mut self, cond: &CondStmt) {
+        self.fuzz_type = cond.get_fuzz_type();
     }
 
     pub fn sync_from_global(&mut self, depot: &Arc<Depot>, gb: &Arc<GlobalBranches>) {
@@ -106,16 +157,39 @@ impl ChartStats {
         self.speed = Average::new(speed as f32, 0);
     }
 
-    pub fn mini_log(&self) -> String {
-        format!(
-            "{}, {}, {}, {}, {}, {}",
-            self.init_time.0.elapsed().as_secs(),
-            self.density.0,
-            self.num_inputs.0,
-            self.num_hangs.0,
-            self.num_crashes.0,
-            self.num_targets.0
-        )
+    pub fn mini_log_hdr(&self) -> Vec<String> {
+        let mut hdr = vec!("secs".to_string(),
+                           "execs".to_string(),
+                           "rounds".to_string(),
+                           "density".to_string(),
+                           "inputs".to_string(),
+                           "hangs".to_string(),
+                           "crashes".to_string(),
+                           "targets".to_string(),
+                           "amps".to_string(),
+                           "best_amp".to_string(),
+                           "path_amps".to_string(),
+                           "current_type".to_string());
+        hdr.extend(self.fuzz.mini_log_hdr());
+        return hdr;
+    }
+
+    pub fn mini_log(&self) -> Vec<String> {
+        let mut row = vec!(self.init_time.0.elapsed().as_secs().to_string(),
+                           self.num_exec.0.to_string(),
+                           self.num_rounds.0.to_string(),
+                           self.density.0.to_string(),
+                           self.num_inputs.0.to_string(),
+                           self.num_hangs.0.to_string(),
+                           self.num_crashes.0.to_string(),
+                           self.num_targets.0.to_string(),
+                           self.num_amps.0.to_string(),
+                           self.best_amp.as_factor().to_string(),
+                           self.path_amplification.to_json(),
+                           get_fuzz_type_name(self.fuzz_type.index()),
+        );
+        row.extend(self.fuzz.mini_log());
+        return row;
     }
 
     pub fn get_explore_num(&self) -> usize {
@@ -146,11 +220,11 @@ impl fmt::Display for ChartStats {
             r#"
 {}
 {}
-    TIMING |     RUN: {},   TRACK: {}
-  COVERAGE |    EDGE: {},   DENSITY: {}%
-    EXECS  |   TOTAL: {},     ROUND: {},     MAX_R: {}
-    SPEED  |  PERIOD: {:6}r/s    TIME: {}us, 
-    FOUND  |    PATH: {},     HANGS: {},   CRASHES: {} 
+    TIMING |     RUN: {},   TRACK: {}     CURRENT_TYPE: {}
+  COVERAGE |    EDGE: {},    DENSITY: {}%
+    EXECS  |   TOTAL: {},      ROUND: {},     MAX_R: {}
+    SPEED  |  PERIOD: {:6}r/s     TIME: {}us,
+    FOUND  |    PATH: {},      HANGS: {},   CRASHES: {},   AMPS: {}   (best: {:.2}x, {} -> {})
 {}
 {}
 {}
@@ -163,6 +237,7 @@ impl fmt::Display for ChartStats {
             " -- OVERVIEW -- ".blue().bold(),
             self.init_time,
             self.track_time,
+            get_fuzz_type_name(self.fuzz_type.index()),
             self.avg_edge_num,
             self.density,
             self.num_exec,
@@ -173,6 +248,10 @@ impl fmt::Display for ChartStats {
             self.num_inputs,
             self.num_hangs,
             self.num_crashes,
+            self.num_amps,
+            self.best_amp.as_factor(),
+            usize::from(&self.best_amp.bytes_in),
+            usize::from(&self.best_amp.bytes_out),
             " -- FUZZ -- ".blue().bold(),
             self.fuzz,
             " -- SEARCH -- ".blue().bold(),

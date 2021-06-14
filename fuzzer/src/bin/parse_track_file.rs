@@ -6,7 +6,7 @@ use std::{env, path::PathBuf};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    if args.len() <= 2 {
+    if args.len() < 2 {
         println!("Wrong command!");
         return;
     }
@@ -14,7 +14,7 @@ fn main() {
     let path = PathBuf::from(&args[1]);
 
     // let t = load_track_data(path.as_path(), 0, 0, 0, 0);
-    let t = match read_and_parse(path.as_path(), true, false) {
+    let (t, load_paths) = match read_and_parse(path.as_path(), true) {
         Result::Ok(val) => val,
         Result::Err(err) => panic!("parse track file error!! {:?}", err),
     };
@@ -45,6 +45,6 @@ fn main() {
             }
         }
     } else {
-        print!("{:#?}", t);
+        print!("{}", serde_json::to_string(&t).unwrap());
     }
 }

@@ -1,10 +1,7 @@
 use crate::{check_dep, search, tmpfs};
 use angora_common::defs;
-use std::{
-    env,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{env, path::{Path, PathBuf}, process::Command, fs};
+use angora_common::defs::TRACK_DIR;
 
 static TMP_DIR: &str = "tmp";
 static INPUT_FILE: &str = "cur_input";
@@ -41,7 +38,7 @@ pub struct CommandOpt {
     pub tmp_dir: PathBuf,
     pub out_file: String,
     pub forksrv_socket_path: String,
-    pub track_path: String,
+    pub track_file_path: String,
     pub is_stdin: bool,
     pub search_method: search::SearchMethod,
     pub mem_limit: u64,
@@ -52,8 +49,8 @@ pub struct CommandOpt {
     pub enable_afl: bool,
     pub enable_exploitation: bool,
     pub directed_targets_file: String,
-    pub sanopt_bin: Option<String>,
     pub directed_only: bool,
+    pub target_addr: String,
 }
 
 pub fn make_absolute(path: &Path) -> PathBuf {
@@ -85,11 +82,11 @@ impl CommandOpt {
         enable_afl: bool,
         enable_exploitation: bool,
         directed_targets_file: &str,
-        sanopt_target: Option<&str>,
         directed_only: bool,
+        target_addr: &str,
     ) -> Self {
         let mode = InstrumentationMode::from(mode);
-        
+
         let tmp_dir = out_dir.join(TMP_DIR);
         tmpfs::create_tmpfs_dir(&tmp_dir);
 
@@ -100,7 +97,10 @@ impl CommandOpt {
             .unwrap()
             .to_owned();
 
-        let track_path = tmp_dir.join(TRACK_FILE).to_str().unwrap().to_owned();
+        let track_dir = out_dir.join(TRACK_DIR);
+        fs::create_dir(&track_dir).unwrap();
+
+        let track_file_path = track_dir.join(format!("angora_{}", TRACK_FILE)).to_str().unwrap().to_owned();
 
         let has_input_arg = pargs.contains(&"@@".to_string());
 
@@ -130,7 +130,7 @@ impl CommandOpt {
         let mut track_args = Vec::<String>::new();
         if mode.is_pin_mode() {
             let project_bin_dir = env::var(defs::ANGORA_BIN_DIR).expect("Please set ANGORA_PROJ_DIR");
-            
+
             let pin_root =
                 env::var(PIN_ROOT_VAR).expect("You should set the environment of PIN_ROOT!");
             let pin_bin = format!("{}/{}", pin_root, "pin");
@@ -151,7 +151,6 @@ impl CommandOpt {
             track_bin = make_absolute_str(&track_target);
             track_args = main_args.clone();
         }
-        let sanopt_bin = sanopt_target.map(|s| s.to_string());
 
         Self {
             mode,
@@ -161,7 +160,7 @@ impl CommandOpt {
             tmp_dir,
             out_file: out_file,
             forksrv_socket_path,
-            track_path,
+            track_file_path,
             is_stdin: !has_input_arg,
             search_method: search::parse_search_method(search_method),
             mem_limit,
@@ -172,8 +171,8 @@ impl CommandOpt {
             enable_afl,
             enable_exploitation,
             directed_targets_file: directed_targets_file.to_string(),
-            sanopt_bin,
             directed_only,
+            target_addr: target_addr.to_owned(),
         }
     }
 
@@ -181,7 +180,7 @@ impl CommandOpt {
         let mut cmd_opt = self.clone();
         let new_file = format!("{}_{}", &cmd_opt.out_file, id);
         let new_forksrv_socket_path = format!("{}_{}", &cmd_opt.forksrv_socket_path, id);
-        let new_track_path = format!("{}_{}", &cmd_opt.track_path, id);
+        let new_track_path = format!("{}_{}", &cmd_opt.track_file_path, id);
         if !self.is_stdin {
             for arg in &mut cmd_opt.main.1 {
                 if arg == "@@" {
@@ -197,28 +196,8 @@ impl CommandOpt {
         cmd_opt.id = id;
         cmd_opt.out_file = new_file.to_owned();
         cmd_opt.forksrv_socket_path = new_forksrv_socket_path.to_owned();
-        cmd_opt.track_path = new_track_path.to_owned();
+        cmd_opt.track_file_path = new_track_path.to_owned();
         cmd_opt.is_raw = false;
-        cmd_opt
-    }
-
-    pub fn sanopt(&self) -> Self {
-        let mut cmd_opt = self.clone();
-        let main_args = self.main.1.clone();
-        let bin = if let Some(optbin) = &self.sanopt_bin {
-            optbin.to_string()
-        } else {
-            self.main.0.clone()
-        };
-        cmd_opt.main = (bin, main_args);
-        let new_file =  format!("{}_{}", &self.out_file, "sanopt");
-        let new_forksrv_socket_path = format!("{}_{}", &self.forksrv_socket_path, "sanopt");
-        let new_track_path = format!("{}_{}", &cmd_opt.track_path, "sanopt");
-        cmd_opt.out_file = new_file.to_owned();
-        cmd_opt.forksrv_socket_path = new_forksrv_socket_path.to_owned();
-        cmd_opt.track_path = new_track_path.to_owned();
-        cmd_opt.uses_asan = true;
-        cmd_opt.mem_limit = 0;
         cmd_opt
     }
 }

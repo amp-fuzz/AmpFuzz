@@ -42,10 +42,10 @@ private:
   class IDGenerator;
   std::unique_ptr<IDGenerator> IdentifierGenerator;
 
-  IdentifiersMap IdMap;
-  CmpsMap CmpMap;
+  IdentifiersMap IdMap; // map things to Parmesan-IDs
+  CmpsMap CmpMap; // map Angora-Comparison-IDs to sets of BasicBlock Parmesan-IDs
   CallSiteDominators CallSiteDominatorsMap;
-  IdAngoraMap IdToAngoraMap;
+  IdAngoraMap IdToAngoraMap; // map BasicBlock Parmesan-IDs to (preceding?) Angora-Comparison-ID (set in AngoraPass.cc in track-mode)
 
   void collectCallSiteDominators(llvm::Function *F);
   void collectPreviousIndirectBranch(llvm::Instruction *Inst, llvm::SmallPtrSet<llvm::Instruction *, 16> *Result, llvm::SmallPtrSet<llvm::Instruction *, 16> *Seen);

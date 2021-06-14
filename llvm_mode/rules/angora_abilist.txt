@@ -33,6 +33,12 @@ fun:__angora_leave_fn=uninstrumented
 fun:__angora_leave_fn=discard
 fun:__unfold_branch_fn=uninstrumented
 fun:__unfold_branch_fn=discard
+fun:__angora_listen_ready=uninstrumented
+fun:__angora_listen_ready=discard
+fun:__angora_check_terminate=uninstrumented
+fun:__angora_check_terminate=discard
+fun:__angora_check_terminate_static=uninstrumented
+fun:__angora_check_terminate_static=discard
 
 ### Memory related
 # alloc
@@ -139,7 +145,6 @@ fun:regexec=discard
 fun:__strdup=custom
 fun:__strndup=custom
 fun:strcat=custom
-#fun:__mempcpy_chk=custom
 fun:strcoll=discard
 fun:rewind=discard
 # fun:asprintf=custom
@@ -215,8 +220,26 @@ fun:vsnprintf=discard
 fun:pthread_cond_broadcast=discard
 fun:pthread_cond_init=discard
 # FIXME: get fixed bytes
+fun:getentropy=uninstrumented
+fun:getentropy=discard
 fun:getrandom=uninstrumented
 fun:getrandom=discard
 
 fun:fcntl64=uninstrumented
 fun:fcntl64=discard
+
+# Ampfuzz
+fun:recv=custom
+fun:recvfrom=custom
+fun:recvmsg=custom
+fun:recvmmsg=custom
+
+# shared library handling
+fun:__angora_dlopen=uninstrumented
+fun:__angora_dlopen=functional
+fun:__angora_dlmopen=uninstrumented
+fun:__angora_dlopen=functional
+fun:__angora_dlsym=uninstrumented
+fun:__angora_dlopen=functional
+
+# newline at the end of file is important!!

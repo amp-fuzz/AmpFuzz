@@ -23,16 +23,6 @@ pub fn fuzz_loop(
         global_stats.clone(),
     );
 
-    let san_cmd_opt = cmd_opt.sanopt();
-    debug!("san_cmd_opt: {:?}", san_cmd_opt);
-    let mut sanitized_executor = Executor::new(
-        san_cmd_opt,
-        global_branches.clone(),
-        depot.clone(),
-        global_stats.clone(),
-    );
-
-
     while running.load(Ordering::Relaxed) {
         let entry = match depot.get_entry() {
             Some(e) => e,
@@ -76,24 +66,7 @@ pub fn fuzz_loop(
 
         {
             let fuzz_type = cond.get_fuzz_type();
-            if cond.is_target {
-                info!("Using Sanopt Executor");
-            } else {
-                info!("Using normal Executor");
-            }
-            let mut cur_executor = if cond.is_target {&mut sanitized_executor} else {&mut executor};
-
-            match fuzz_type {
-                FuzzType::ExploreFuzz => {
-                    // Avoid sanitized binary when exploring
-                },
-                 _ => {
-                    cur_executor = &mut sanitized_executor;
-                },
-            }
-            
-
-            let handler = SearchHandler::new(running.clone(), &mut cur_executor, &mut cond, buf);
+            let handler = SearchHandler::new(running.clone(), &mut executor, &mut cond, buf);
             match fuzz_type {
                 FuzzType::ExploreFuzz => {
                     if handler.cond.is_time_expired() {
@@ -137,6 +110,9 @@ pub fn fuzz_loop(
                 },
                 FuzzType::CmpFnFuzz => {
                     FnFuzz::new(handler).run();
+                },
+                FuzzType::AmpFuzz => {
+                    AmpFuzz::new(handler).run();
                 },
                 FuzzType::OtherFuzz => {
                     warn!("Unknown fuzz type!!");

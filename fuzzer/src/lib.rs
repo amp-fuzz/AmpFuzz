@@ -4,6 +4,8 @@
 extern crate log;
 #[macro_use]
 extern crate derive_more;
+#[macro_use]
+extern crate lazy_static;
 
 extern crate petgraph;
 extern crate disjoint_sets;
@@ -13,6 +15,8 @@ extern crate csv;
 extern crate serde_derive;
 
 extern crate itertools;
+
+pub use crate::fuzz_main::fuzz_main;
 
 mod branches;
 mod cond_stmt;
@@ -33,6 +37,6 @@ mod command;
 mod tmpfs;
 
 mod dyncfg;
+mod byte_count;
 //mod directed;
 
-pub use crate::fuzz_main::fuzz_main;

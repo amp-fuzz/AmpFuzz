@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #===- lib/dfsan/scripts/build-libc-list.py ---------------------------------===#
 #
 #                     The LLVM Compiler Infrastructure
@@ -15,7 +15,7 @@
 import os
 import subprocess
 import sys
-from optparse import OptionParser
+from argparse import ArgumentParser
 
 def defined_function_list(object):
   functions = []
@@ -32,26 +32,26 @@ def defined_function_list(object):
       functions.append(function_name)
   return functions
 
-p = OptionParser()
+p = ArgumentParser()
 
-p.add_option('--libc-dso-path', metavar='PATH',
+p.add_argument('--libc-dso-path', metavar='PATH',
              help='path to libc DSO directory',
              default='/lib/x86_64-linux-gnu')
-p.add_option('--libc-archive-path', metavar='PATH',
+p.add_argument('--libc-archive-path', metavar='PATH',
              help='path to libc archive directory',
              default='/usr/lib/x86_64-linux-gnu')
 
-p.add_option('--libgcc-dso-path', metavar='PATH',
+p.add_argument('--libgcc-dso-path', metavar='PATH',
              help='path to libgcc DSO directory',
              default='/lib/x86_64-linux-gnu')
-p.add_option('--libgcc-archive-path', metavar='PATH',
+p.add_argument('--libgcc-archive-path', metavar='PATH',
              help='path to libgcc archive directory',
              default='/usr/lib/gcc/x86_64-linux-gnu/4.6')
 
-p.add_option('--with-libstdcxx', action='store_true',
+p.add_argument('--with-libstdcxx', action='store_true',
              dest='with_libstdcxx',
              help='include libstdc++ in the list (inadvisable)')
-p.add_option('--libstdcxx-dso-path', metavar='PATH',
+p.add_argument('--libstdcxx-dso-path', metavar='PATH',
              help='path to libstdc++ DSO directory',
              default='/usr/lib/x86_64-linux-gnu')
 
@@ -87,10 +87,10 @@ for l in libs:
   if os.path.exists(l):
     functions += defined_function_list(l)
   else:
-    print >> sys.stderr, 'warning: library %s not found' % l
+    print(f'warning: library {l} not found', file=sys.stderr)
 
 functions = list(set(functions))
 functions.sort()
 
 for f in functions:
-  print 'fun:%s=uninstrumented' % f
+  print(f'fun:{f}=uninstrumented')

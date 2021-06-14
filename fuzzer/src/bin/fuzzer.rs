@@ -37,12 +37,6 @@ fn main() {
             .value_name("PROM")
             .help("Sets the target (USE_TRACK or USE_PIN) for tracking, including taints, cmps.  Only set in LLVM mode.")
             .takes_value(true))
-        .arg(Arg::with_name("sanopt_target")
-            .short("s")
-            .long("sanopt")
-            .value_name("PROM")
-            .help("Sets the unsanitized (fast executable) target for sanopt")
-            .takes_value(true))
         .arg(Arg::with_name("pargs")
             .help("Targeted program (USE_FAST) and arguments. Any \"@@\" will be substituted with the input filename from Angora.")
             .required(true)
@@ -97,6 +91,12 @@ fn main() {
             .short("D")
             .long("only_directed")
             .help("Only consider CMPs that have a path to one of the targets (Warn: only use if static CFG is sufficient.)"))
+        .arg(Arg::with_name("target_addr")
+            .long("target_addr")
+            .value_name("TARGET_IP:PORT")
+            .help("Address and port of target")
+            .required(true)
+            .takes_value(true))
         .get_matches();
 
     fuzz_main(
@@ -113,7 +113,7 @@ fn main() {
         matches.occurrences_of("disable_afl_mutation") == 0,
         matches.occurrences_of("disable_exploitation") == 0,
         matches.value_of("cfg_file").unwrap(),
-        matches.value_of("sanopt_target"),
         matches.occurrences_of("only_directed") > 0,
+        matches.value_of("target_addr").unwrap(),
     );
 }

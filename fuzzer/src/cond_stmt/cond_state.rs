@@ -2,7 +2,7 @@ use crate::{cond_stmt::CondStmt, mut_input::offsets::*};
 use angora_common::{config, defs};
 use std;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum CondState {
     Offset,
     OffsetOpt,

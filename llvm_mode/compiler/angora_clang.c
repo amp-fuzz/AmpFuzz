@@ -36,6 +36,7 @@ static u8 **cc_params;     /* Parameters passed to the real CC  */
 static u32 cc_par_cnt = 1; /* Param count, including argv0      */
 static u8 clang_type = CLANG_FAST_TYPE;
 static u8 is_cxx = 0;
+static u8 nostdincxx = 0;
 
 /* Try to find the runtime libraries. If that fails, abort. */
 static void find_obj(u8 *argv0) {
@@ -54,10 +55,14 @@ static void find_obj(u8 *argv0) {
       obj_path = dir;
       ck_free(tmp);
       return;
+    }else{
+        FATAL("Cannot access 'libAngoraPass.so'");
     }
 
     ck_free(tmp);
     ck_free(dir);
+  }else{
+      FATAL("no slash");
   }
 
   FATAL("Unable to find 'libAngoraPass.so'");
@@ -149,8 +154,8 @@ static void add_angora_runtime() {
     cc_params[cc_par_cnt++] =
         alloc_printf("-Wl,--dynamic-list=%s/lib/libdfsan_rt-x86_64.a.syms", obj_path);
 
-    cc_params[cc_par_cnt++] = alloc_printf("%s/lib/libruntime.a", obj_path);
     cc_params[cc_par_cnt++] = alloc_printf("%s/lib/libDFSanIO.a", obj_path);
+    cc_params[cc_par_cnt++] = alloc_printf("%s/lib/libruntime.a", obj_path); // libDFSanIO.a depends on libruntime.a -> libruntime.a must be placed last
     char *rule_obj = getenv(TAINT_CUSTOM_RULE_VAR);
     if (rule_obj) {
       cc_params[cc_par_cnt++] = rule_obj;
@@ -248,6 +253,9 @@ static void edit_params(u32 argc, char **argv) {
 
     if (!strcmp(cur, "-shared"))
       maybe_linking = 0;
+
+    if (!strcmp(cur, "-nostdinc++"))
+        nostdincxx = 1;
 
     if (!strcmp(cur, "-Wl,-z,defs") || !strcmp(cur, "-Wl,--no-undefined"))
       continue;
@@ -364,14 +372,12 @@ static void edit_params(u32 argc, char **argv) {
     "_I(); } while (0)";
   */
 
-  if (is_cxx) {
-    // FIXME: or use the same header
-    // cc_params[cc_par_cnt++] = "-I/path-to-llvm/include/c++/v1";
+  if (is_cxx && !nostdincxx) {
+    cc_params[cc_par_cnt++] = alloc_printf("-I%s/include/c++/v1/", obj_path);
     if (clang_type == CLANG_FAST_TYPE) {
       cc_params[cc_par_cnt++] = alloc_printf("-L%s/lib/libcxx_fast/", obj_path);
       cc_params[cc_par_cnt++] = "-stdlib=libc++";
       cc_params[cc_par_cnt++] = "-Wl,--start-group";
-      cc_params[cc_par_cnt++] = "-lc++abifast";
       cc_params[cc_par_cnt++] = "-lc++abi";
       cc_params[cc_par_cnt++] = "-Wl,--end-group";
     }
@@ -379,7 +385,6 @@ static void edit_params(u32 argc, char **argv) {
       cc_params[cc_par_cnt++] = alloc_printf("-L%s/lib/libcxx_track/", obj_path);
       cc_params[cc_par_cnt++] = "-stdlib=libc++";
       cc_params[cc_par_cnt++] = "-Wl,--start-group";
-      cc_params[cc_par_cnt++] = "-lc++abitrack";
       cc_params[cc_par_cnt++] = "-lc++abi";
       cc_params[cc_par_cnt++] = "-Wl,--end-group";
     }
@@ -446,12 +451,13 @@ int main(int argc, char **argv) {
   find_obj(argv[0]);
 
   edit_params(argc, argv);
-  /*
+
+  printf("Call will be:\n");
   for (int i = 0; i < cc_par_cnt; i++) {
     printf("%s ", cc_params[i]);
   }
   printf("\n");
-  */
+
  
   execvp(cc_params[0], (char **)cc_params);
 

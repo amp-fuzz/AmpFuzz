@@ -3,7 +3,7 @@ use crate::fuzz_type::FuzzType;
 use angora_common::{cond_stmt_base::CondStmtBase, defs, tag::TagSeg};
 use std::hash::{Hash, Hasher};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone,Serialize)]
 pub struct CondStmt {
     pub base: CondStmtBase,
     pub offsets: Vec<TagSeg>,
@@ -67,6 +67,7 @@ impl CondStmt {
             defs::COND_AFL_OP => FuzzType::AFLFuzz,
             defs::COND_LEN_OP => FuzzType::LenFuzz,
             defs::COND_FN_OP => FuzzType::CmpFnFuzz,
+            defs::COND_AMP_OP => FuzzType::AmpFuzz,
             _ => {
                 if self.base.is_explore() {
                     FuzzType::ExploreFuzz
@@ -119,6 +120,14 @@ impl CondStmt {
         afl_cond.base.order = 0;
         afl_cond.base.arg1 = edge_num as u64;
         afl_cond
+    }
+
+    pub fn get_amp_cond(id: usize) -> Self {
+        let mut amp_cond = Self::new();
+        amp_cond.base.op = defs::COND_AMP_OP;
+        amp_cond.base.cmpid = !(id as u32); // differentiate from AFL cond by assigning a different id
+        amp_cond.base.belong = id as u32; // keep link to original input
+        amp_cond
     }
 
     pub fn is_done(&self) -> bool {

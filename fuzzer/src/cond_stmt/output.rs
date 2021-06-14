@@ -21,6 +21,10 @@ impl CondOutput for CondStmtBase {
             b = translate_signed_value(b, self.size);
         }
 
+        if self.op == defs::COND_LEN_OP {
+            return sub_abs(a, b);
+        }
+
         let mut op = self.op & defs::COND_BASIC_MASK;
 
         if op == defs::COND_SW_OP {

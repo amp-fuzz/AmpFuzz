@@ -24,6 +24,8 @@ impl<'a> LenFuzz<'a> {
         */
         //let offset = self.handler.cond.base.lb1 as usize;
         let size = self.handler.cond.base.lb2 as usize;
+
+        // absolute difference between arg1 and arg2
         let delta = self.handler.cond.base.get_output() as usize;
         let mut buf = self.handler.buf.clone();
         debug!(
@@ -33,6 +35,11 @@ impl<'a> LenFuzz<'a> {
             buf.len()
         );
         if delta > 0 {
+            // assumes usage as in
+            // ```c
+            // if(fread(&i, sizeof(int), 1, fp) < 1) { ... }
+            // ```
+            // -> size is the size of individual reads, delta is the number of read operations
             let extended_len = delta * size;
             if extended_len < config::MAX_INPUT_LEN {
                 let buf_len = buf.len();

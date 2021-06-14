@@ -1847,13 +1847,17 @@ POST_SYSCALL(sendto)(long res, long arg0, void *arg1, long arg2, long arg3,
 PRE_SYSCALL(sendmsg)(long fd, void *msg, long flags) {}
 
 POST_SYSCALL(sendmsg)(long res, long fd, void *msg, long flags) {
-  // FIXME: POST_READ
+  if (res >= 0) {
+    if (msg) POST_READ(msg, res);
+  }
 }
 
 PRE_SYSCALL(sendmmsg)(long fd, void *msg, long vlen, long flags) {}
 
 POST_SYSCALL(sendmmsg)(long res, long fd, void *msg, long vlen, long flags) {
-  // FIXME: POST_READ
+  if (res >= 0) {
+    if (msg) POST_READ(msg, res);
+  }
 }
 
 PRE_SYSCALL(recv)(long arg0, void *buf, long len, long flags) {}

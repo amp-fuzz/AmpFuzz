@@ -1,11 +1,13 @@
 use std;
+
 // -- envs
 pub static DISABLE_CPU_BINDING_VAR: &str = "ANGORA_DISABLE_CPU_BINDING";
 pub static ANGORA_BIN_DIR: &str = "ANGORA_BIN_DIR";
 
 // executor.rs
-pub static TRACK_OUTPUT_VAR: &str = "ANGORA_TRACK_OUTPUT";
+pub static TRACK_FILE_PATH_VAR: &str = "ANGORA_TRACK_PATH";
 pub static COND_STMT_ENV_VAR: &str = "ANGORA_COND_STMT_SHM_ID";
+pub static LISTEN_SEM_ENV_VAR: &str = "ANGORA_LISTEN_SEM_SHM_ID";
 pub static BRANCHES_SHM_ENV_VAR: &str = "ANGORA_BRANCHES_SHM_ID";
 pub static LD_LIBRARY_PATH_VAR: &str = "LD_LIBRARY_PATH";
 pub static ASAN_OPTIONS_VAR: &str = "ASAN_OPTIONS";
@@ -15,8 +17,19 @@ pub static ASAN_OPTIONS_CONTENT: &str =
 pub const MSAN_ERROR_CODE: i32 = 86;
 pub static MSAN_OPTIONS_CONTENT: &str =
     "exit_code=86:symbolize=0:abort_on_error=1:allocator_may_return_null=1:msan_track_origins=0";
+pub static FUZZ_PORT_VAR: &str = "ANGORA_FUZZ_PORT";
+pub static EARLY_TERMINATION_VAR: &str = "ANGORA_EARLY_TERMINATION";
+
+#[derive(PartialEq, Debug)]
+pub enum EarlyTermination {
+    None,
+    Dynamic,
+    Static,
+    Full,
+}
 
 // depot.rs
+pub static AMPS_DIR: &str = "amps";
 pub static CRASHES_DIR: &str = "crashes";
 pub static HANGS_DIR: &str = "hangs";
 pub static INPUTS_DIR: &str = "queue";
@@ -30,6 +43,7 @@ pub static ANGORA_DIR_NAME: &str = "angora";
 pub static ANGORA_LOG_FILE: &str = "angora.log";
 pub static COND_QUEUE_FILE: &str = "cond_queue.csv";
 pub static CHART_STAT_FILE: &str = "chart_stat.json";
+pub static TRACK_DIR: &str = "track";
 
 pub const SLOW_SPEED: u32 = 888888;
 pub const UNREACHABLE: u64 = std::u64::MAX;
@@ -98,6 +112,7 @@ pub const COND_FN_OP: u32 = 0x8002;
 pub const COND_LEN_OP: u32 = 0x8003;
 // pub const COND_ENTER_FN: u32 = 0x8010;
 // pub const COND_LEAVE_FN: u32 = 0x8011;
+pub const COND_AMP_OP: u32 = 0x8080;
 
 // condition field
 pub const COND_FALSE_ST: u32 = 0;

@@ -33,7 +33,7 @@ pub fn sync_depot(executor: &mut Executor, running: Arc<AtomicBool>, dir: &Path)
         }
     }
     info!("sync {} file from seeds.", executor.local_stats.num_inputs);
-    executor.update_log();
+    executor.finish_round();
 }
 
 // Now we are in a sub-dir of AFL's output dir
@@ -68,7 +68,7 @@ pub fn sync_afl(
     let n: usize = executor.local_stats.num_inputs.into();
     info!("sync {} file from AFL.", n);
 
-    executor.update_log();
+    executor.finish_round();
 }
 
 fn get_afl_id(f: &fs::DirEntry) -> Option<usize> {

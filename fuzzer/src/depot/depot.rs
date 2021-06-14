@@ -12,15 +12,20 @@ use std::{
         Mutex, RwLock,
     },
 };
+
+use md5::{Md5, Digest};
 // https://crates.io/crates/priority-queue
 use angora_common::config;
 use priority_queue::PriorityQueue;
+use crate::byte_count::{UdpByteCount, AmpByteCount};
+use crate::branches::PathV;
 
 pub struct Depot {
     pub queue: Mutex<PriorityQueue<CondStmt, QPriority>>,
     pub num_inputs: AtomicUsize,
     pub num_hangs: AtomicUsize,
     pub num_crashes: AtomicUsize,
+    pub num_amps: AtomicUsize,
     pub dirs: DepotDir,
     pub cfg: RwLock<ControlFlowGraph>,
 }
@@ -32,8 +37,9 @@ impl Depot {
             num_inputs: AtomicUsize::new(0),
             num_hangs: AtomicUsize::new(0),
             num_crashes: AtomicUsize::new(0),
+            num_amps: AtomicUsize::new(0),
             dirs: DepotDir::new(in_dir, out_dir),
-            cfg
+            cfg,
         }
     }
 
@@ -59,14 +65,36 @@ impl Depot {
         id
     }
 
-    pub fn save(&self, status: StatusType, buf: &Vec<u8>, cmpid: u32) -> usize {
+    fn save_amp(path: &PathV, amp: &AmpByteCount, buf: &Vec<u8>, num: &AtomicUsize, dir: &Path) -> bool {
+        let mut hasher = Md5::new();
+        hasher.update(buf);
+        let md5sum = hasher.finalize();
+
+        //let mut def_hasher = DefaultHasher::new();
+        //Hash::hash_slice(&path, &mut def_hasher);
+        //let exec_path_hash = def_hasher.finish();
+        // TODO: use new multi-layer counts
+        let file_name = format!("amp_{:06.2}_{:x}_{:x}", amp.as_factor(), path, md5sum);
+        let new_path = dir.join(file_name);
+        if new_path.exists() {
+            return false;
+        }
+        num.fetch_add(1, Ordering::Relaxed);
+        let mut f = fs::File::create(new_path.as_path()).expect("Could not save new input file.");
+        f.write_all(buf)
+            .expect("Could not write seed buffer to file.");
+        f.flush().expect("Could not flush file I/O.");
+        true
+    }
+
+    pub fn save(&self, status: &StatusType, buf: &Vec<u8>, cmpid: u32) -> usize {
         match status {
             StatusType::Normal => {
                 Self::save_input(&status, buf, &self.num_inputs, cmpid, &self.dirs.inputs_dir)
-            },
+            }
             StatusType::Timeout => {
                 Self::save_input(&status, buf, &self.num_hangs, cmpid, &self.dirs.hangs_dir)
-            },
+            }
             StatusType::Crash => Self::save_input(
                 &status,
                 buf,
@@ -74,6 +102,14 @@ impl Depot {
                 cmpid,
                 &self.dirs.crashes_dir,
             ),
+            StatusType::Amp(path, amp) => {
+                // save to amps, but also keep as input (for further fuzzing!)
+                if Self::save_amp(&path, &amp, buf, &self.num_amps, &self.dirs.amps_dir) {
+                    Self::save_input(&StatusType::Normal, buf, &self.num_inputs, cmpid, &self.dirs.inputs_dir)
+                } else {
+                    0
+                }
+            }
             _ => 0,
         }
     }
@@ -97,7 +133,7 @@ impl Depot {
             Err(poisoned) => {
                 warn!("Mutex poisoned! Results may be incorrect. Continuing...");
                 poisoned.into_inner()
-            },
+            }
         };
         q.peek()
             .and_then(|x| Some((x.0.clone(), x.1.clone())))
@@ -116,12 +152,11 @@ impl Depot {
             Err(poisoned) => {
                 warn!("Mutex poisoned! Results may be incorrect. Continuing...");
                 poisoned.into_inner()
-            },
+            }
         };
 
         for mut cond in conds {
             if cond.is_desirable {
-
                 let cfg = self.cfg.read().unwrap();
                 //let distance = cfg.score_for_cmp(cond.base.cmpid);
                 let distance = cfg.score_for_cmp_inp(cond.base.cmpid, cond.variables.clone());
@@ -157,7 +192,7 @@ impl Depot {
             Err(poisoned) => {
                 warn!("Mutex poisoned! Results may be incorrect. Continuing...");
                 poisoned.into_inner()
-            },
+            }
         };
         if let Some(v) = q.get_mut(&cond) {
             v.0.clone_from(&cond);

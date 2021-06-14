@@ -1,17 +1,17 @@
 
-find_package(LLVM REQUIRED CONFIG)
-
-if (LLVM_FOUND)
-    message(STATUS "LLVM_VERSION_MAJOR: ${LLVM_VERSION_MAJOR}")
-    message(STATUS "LLVM_VERSION_MINOR: ${LLVM_VERSION_MINOR}")
-    message(STATUS "LLVM_VERSION_PATCH: ${LLVM_VERSION_PATCH}")
-    if (${LLVM_VERSION_MAJOR} GREATER 7 OR ${LLVM_VERSION_MAJOR} LESS 4)
-        message(FATAL_ERROR "LLVM version should be 4.0.0 - 7.1.0 !")
-    endif()
-else()
-    message(FATAL_ERROR "You haven't install LLVM !")
+set(CMAKE_FIND_PACKAGE_RESOLVE_SYMLINKS TRUE)
+find_package(LLVM 11.0 CONFIG)
+if(NOT LLVM_FOUND)
+    find_package(LLVM 11.1 CONFIG)
 endif()
 
+if (NOT LLVM_FOUND)
+    message(FATAL_ERROR "LLVM version 11 or above required!")
+endif()
+
+message(STATUS "LLVM_VERSION_MAJOR: ${LLVM_VERSION_MAJOR}")
+message(STATUS "LLVM_VERSION_MINOR: ${LLVM_VERSION_MINOR}")
+message(STATUS "LLVM_VERSION_PATCH: ${LLVM_VERSION_PATCH}")
 
 EXECUTE_PROCESS(
     COMMAND cat ${CMAKE_CURRENT_SOURCE_DIR}/../../common/src/config.rs          
@@ -34,7 +34,7 @@ if (NOT TARGET LLVMPassConfig)
     )
 endif()
 
-set (CMAKE_CXX_STANDARD 11)
+set (CMAKE_CXX_STANDARD 14)
 # fix pass bug: https://github.com/sampsyo/llvm-pass-skeleton/issues/7#issuecomment-401834287
 set (CMAKE_MODULE_LINKER_FLAGS "${CMAKE_CXX_LINK_FLAGS} -Wl,-znodelete")
 if(APPLE)
@@ -44,12 +44,28 @@ endif(APPLE)
 
 add_library(UnfoldBranchPass MODULE UnfoldBranchPass.cc)
 target_link_libraries(UnfoldBranchPass LLVMPassConfig)
+add_custom_command(TARGET UnfoldBranchPass POST_BUILD
+        COMMAND mkdir -p "${ANGORA_PASS_DIR}"
+        COMMAND cp "${CMAKE_CURRENT_BINARY_DIR}/$<TARGET_FILE_NAME:UnfoldBranchPass>" "${ANGORA_PASS_DIR}")
 install (TARGETS UnfoldBranchPass DESTINATION ${ANGORA_PASS_DIR})
+
+add_library(IDPass MODULE IDPass.cc)
+target_link_libraries(IDPass LLVMPassConfig)
+add_custom_command(TARGET IDPass POST_BUILD
+        COMMAND mkdir -p "${ANGORA_PASS_DIR}"
+        COMMAND cp "${CMAKE_CURRENT_BINARY_DIR}/$<TARGET_FILE_NAME:IDPass>" "${ANGORA_PASS_DIR}")
+install (TARGETS IDPass DESTINATION ${ANGORA_PASS_DIR})
 
 add_library(AngoraPass MODULE AngoraPass.cc)
 target_link_libraries(AngoraPass LLVMPassConfig)
+add_custom_command(TARGET AngoraPass POST_BUILD
+        COMMAND mkdir -p "${ANGORA_PASS_DIR}"
+        COMMAND cp "${CMAKE_CURRENT_BINARY_DIR}/$<TARGET_FILE_NAME:AngoraPass>" "${ANGORA_PASS_DIR}")
 install (TARGETS AngoraPass DESTINATION ${ANGORA_PASS_DIR})
 
 add_library(DFSanPass MODULE DFSanPass.cc)
 target_link_libraries(DFSanPass LLVMPassConfig)
+add_custom_command(TARGET DFSanPass POST_BUILD
+        COMMAND mkdir -p "${ANGORA_PASS_DIR}"
+        COMMAND cp "${CMAKE_CURRENT_BINARY_DIR}/$<TARGET_FILE_NAME:DFSanPass>" "${ANGORA_PASS_DIR}")
 install (TARGETS DFSanPass DESTINATION ${ANGORA_PASS_DIR})

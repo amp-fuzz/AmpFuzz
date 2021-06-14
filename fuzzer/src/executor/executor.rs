@@ -1,30 +1,28 @@
 use super::{limit::SetLimit, *};
 
-use crate::{
-    branches, command,
-    cond_stmt::{self, NextState},
-    depot, stats, track,
-    dyncfg::cfg::{CmpId},
-};
-use angora_common::{config, defs, tag::TagSeg};
+use crate::{branches, command, cond_stmt::{self, NextState}, depot, stats, track, dyncfg::cfg::{CmpId}};
+use angora_common::{config, defs, tag::TagSeg, listen_semaphore};
 
-use std::{
-    collections::HashMap,
-    path::Path,
-    process::{Command, Stdio},
-    sync::{
-        atomic::{compiler_fence, Ordering},
-        Arc, RwLock,
-    },
-    time,
-};
+use std::{collections::HashMap, path::Path, process::{Command, Stdio}, sync::{
+    atomic::{compiler_fence, Ordering},
+    Arc, RwLock,
+}, time, env};
 use wait_timeout::ChildExt;
 use itertools::Itertools;
+use std::net::{UdpSocket, SocketAddr};
+use std::io::Error;
+use crate::executor::recv_thread::RecvThread;
+use crate::cond_stmt::CondStmt;
+use crate::byte_count::{UdpByteCount, AmpByteCount};
+use std::ffi::{CStr, OsStr};
+use std::os::unix::ffi::OsStrExt;
+use crate::track::load_track_data;
 
 pub struct Executor {
     pub cmd: command::CommandOpt,
     pub branches: branches::Branches,
     pub t_conds: cond_stmt::ShmConds,
+    pub listen_sem: listen_semaphore::ShmListenSemaphore,
     envs: HashMap<String, String>,
     forksrv: Option<Forksrv>,
     depot: Arc<depot::Depot>,
@@ -33,6 +31,7 @@ pub struct Executor {
     invariable_cnt: usize,
     pub last_f: u64,
     pub has_new_path: bool,
+    pub has_good_amp: bool,
     pub global_stats: Arc<RwLock<stats::ChartStats>>,
     pub local_stats: stats::LocalStats,
     is_directed: bool,
@@ -48,6 +47,7 @@ impl Executor {
         // ** Share Memory **
         let branches = branches::Branches::new(global_branches);
         let t_conds = cond_stmt::ShmConds::new();
+        let listen_sem = listen_semaphore::ShmListenSemaphore::new();
 
         // ** Envs **
         let mut envs = HashMap::new();
@@ -68,12 +68,30 @@ impl Executor {
             t_conds.get_id().to_string(),
         );
         envs.insert(
+            defs::LISTEN_SEM_ENV_VAR.to_string(),
+            listen_sem.get_id().to_string(),
+        );
+        envs.insert(
             defs::LD_LIBRARY_PATH_VAR.to_string(),
             cmd.ld_library.clone(),
         );
-
+        let target_addr: SocketAddr = cmd.target_addr.parse().expect("Failed to parse target address");
+        envs.insert(
+            defs::FUZZ_PORT_VAR.to_string(),
+            target_addr.port().to_string().clone(),
+        );
+        match env::var(defs::EARLY_TERMINATION_VAR) {
+            Ok(v) => {
+                envs.insert(
+                    defs::EARLY_TERMINATION_VAR.to_string(),
+                    v,
+                );
+            }
+            Err(_) => {}
+        };
         let fd = pipe_fd::PipeFd::new(&cmd.out_file);
-        let forksrv = Some(forksrv::Forksrv::new(
+        let forksrv = None; //temporarily disable forkserver
+        /*Some(forksrv::Forksrv::new(
             &cmd.forksrv_socket_path,
             &cmd.main,
             &envs,
@@ -82,7 +100,8 @@ impl Executor {
             cmd.uses_asan,
             cmd.time_limit,
             cmd.mem_limit,
-        ));
+            &cmd.target_addr,
+        ));*/
 
         let is_directed = cmd.directed_only;
 
@@ -90,6 +109,7 @@ impl Executor {
             cmd,
             branches,
             t_conds,
+            listen_sem,
             envs,
             forksrv,
             depot,
@@ -98,6 +118,7 @@ impl Executor {
             invariable_cnt: 0,
             last_f: defs::UNREACHABLE,
             has_new_path: false,
+            has_good_amp: false,
             global_stats,
             local_stats: Default::default(),
             is_directed,
@@ -122,15 +143,15 @@ impl Executor {
             self.cmd.uses_asan,
             self.cmd.time_limit,
             self.cmd.mem_limit,
+            &self.cmd.target_addr,
         );
         self.forksrv = Some(fs);
     }
 
-    // FIXME: The location id may be inconsistent between track and fast programs.
     fn check_consistent(&self, output: u64, cond: &mut cond_stmt::CondStmt) {
         if output == defs::UNREACHABLE
             && cond.is_first_time()
-            && self.local_stats.num_exec == 1.into()
+            && self.local_stats.num_exec_round == 1.into()
             && cond.state.is_initial()
         {
             cond.is_consistent = false;
@@ -162,7 +183,7 @@ impl Executor {
     fn check_explored(
         &self,
         cond: &mut cond_stmt::CondStmt,
-        _status: StatusType,
+        _status: &StatusType,
         output: u64,
         explored: &mut bool,
     ) -> bool {
@@ -191,12 +212,12 @@ impl Executor {
         let output = self.t_conds.get_cond_output();
         let mut explored = false;
         let mut skip = false;
-        skip |= self.check_explored(cond, status, output, &mut explored);
+        skip |= self.check_explored(cond, &status, output, &mut explored);
         skip |= self.check_invariable(output, cond);
         self.check_consistent(output, cond);
 
-        self.do_if_has_new(buf, status, explored, cond.base.cmpid);
-        status = self.check_timeout(status, cond);
+        self.do_if_has_new(buf, &status, explored, Some(cond));
+        status = self.check_timeout(&status, cond);
 
         if skip {
             status = StatusType::Skip;
@@ -205,57 +226,60 @@ impl Executor {
         (status, output)
     }
 
-    fn try_unlimited_memory(&mut self, buf: &Vec<u8>, cmpid: u32) -> bool {
-        let mut skip = false;
+    fn try_unlimited_memory(&mut self, buf: &Vec<u8>, cmpid: u32) -> StatusType {
         self.branches.clear_trace();
         if self.cmd.is_stdin {
             self.fd.rewind();
         }
         compiler_fence(Ordering::SeqCst);
         let unmem_status =
-            self.run_target(&self.cmd.main, config::MEM_LIMIT_TRACK, self.cmd.time_limit);
+            self.run_target(&self.cmd.main, config::MEM_LIMIT_TRACK, self.cmd.time_limit, buf);
         compiler_fence(Ordering::SeqCst);
 
         // find difference
-        if unmem_status != StatusType::Normal {
-            skip = true;
+        if !matches!(unmem_status, StatusType::Normal|StatusType::Amp(_,_)) {
             warn!(
                 "Behavior changes if we unlimit memory!! status={:?}",
                 unmem_status
             );
             // crash or hang
-            if self.branches.has_new(unmem_status, self.is_directed).0 {
-                self.depot.save(unmem_status, &buf, cmpid);
+            if self.branches.has_new(&unmem_status, self.is_directed).0 {
+                self.depot.save(&unmem_status, &buf, cmpid);
             }
         }
-        skip
+        unmem_status
     }
 
-    fn do_if_has_new(&mut self, buf: &Vec<u8>, status: StatusType, _explored: bool, cmpid: u32) {
-        // new edge: one byte in bitmap
-        let (has_new_path, has_new_edge, edge_num) = self.branches.has_new(status, self.is_directed);
+    fn do_if_has_new(&mut self, buf: &Vec<u8>, status: &StatusType, _explored: bool, parent_cond: Option<&CondStmt>) {
+        let cmpid = match parent_cond {
+            None => { 0 }
+            Some(parent_cond) => { parent_cond.base.cmpid }
+        };
 
-        if has_new_path {
-            self.has_new_path = true;
+        // new edge: one byte in bitmap
+        let (has_new_path, has_new_edge, edge_num, has_good_amp) = self.branches.has_new(status, self.is_directed);
+
+        if has_new_path | has_good_amp {
+            self.has_new_path = has_new_path;
+            self.has_good_amp = has_good_amp;
             self.local_stats.find_new(&status);
             let id = self.depot.save(status, &buf, cmpid);
 
-            if status == StatusType::Normal {
+            if let StatusType::Normal | StatusType::Amp(_,_) = status {
                 self.local_stats.avg_edge_num.update(edge_num as f32);
-                let speed = self.count_time();
-                let speed_ratio = self.local_stats.avg_exec_time.get_ratio(speed as f32);
+                let speed = self.count_time(&buf);
                 self.local_stats.avg_exec_time.update(speed as f32);
 
-                // Avoid track slow ones
-                if (!has_new_edge && speed_ratio > 10 && id > 10) || (speed_ratio > 25 && id > 10) {
-                    warn!(
-                        "Skip tracking id {}, speed: {}, speed_ratio: {}, has_new_edge: {}",
-                        id, speed, speed_ratio, has_new_edge
-                    );
-                    return;
+                let unmem_status = self.try_unlimited_memory(buf, cmpid);
+
+                if matches!(unmem_status, StatusType::Amp(_,_)) {
+                    // if parent_cond was *not* an amplification, generate amplification conds for this input
+                    if parent_cond == None || parent_cond.unwrap().base.op != defs::COND_AMP_OP {
+                        self.depot.add_entries(vec![cond_stmt::CondStmt::get_amp_cond(id)]);
+                    }
                 }
-                let crash_or_tmout = self.try_unlimited_memory(buf, cmpid);
-                if !crash_or_tmout {
+
+                if has_new_path && matches!(unmem_status, StatusType::Normal|StatusType::Amp(_,_)) {
                     let cond_stmts = self.track(id, buf, speed);
                     if cond_stmts.len() > 0 {
                         self.depot.add_entries(cond_stmts);
@@ -274,23 +298,28 @@ impl Executor {
     pub fn run(&mut self, buf: &Vec<u8>, cond: &mut cond_stmt::CondStmt) -> StatusType {
         self.run_init();
         let status = self.run_inner(buf);
-        self.do_if_has_new(buf, status, false, 0);
-        self.check_timeout(status, cond)
+        self.do_if_has_new(buf, &status, false, Some(cond));
+        self.check_timeout(&status, cond)
     }
 
     pub fn run_sync(&mut self, buf: &Vec<u8>) {
         self.run_init();
         let status = self.run_inner(buf);
-        self.do_if_has_new(buf, status, false, 0);
+        self.do_if_has_new(buf, &status, false, None);
     }
 
     fn run_init(&mut self) {
         self.has_new_path = false;
         self.local_stats.num_exec.count();
+        self.local_stats.num_exec_round.count();
     }
 
-    fn check_timeout(&mut self, status: StatusType, cond: &mut cond_stmt::CondStmt) -> StatusType {
-        let mut ret_status = status;
+    fn run_exit(&mut self) {
+        self.sync_to_global();
+    }
+
+    fn check_timeout(&mut self, status: &StatusType, cond: &mut cond_stmt::CondStmt) -> StatusType {
+        let mut ret_status = status.clone();
         if ret_status == StatusType::Error {
             self.rebind_forksrv();
             ret_status = StatusType::Timeout;
@@ -317,29 +346,31 @@ impl Executor {
 
         compiler_fence(Ordering::SeqCst);
         let ret_status = if let Some(ref mut fs) = self.forksrv {
-            fs.run()
+            fs.run(&self.listen_sem, &buf)
         } else {
-            self.run_target(&self.cmd.main, self.cmd.mem_limit, self.cmd.time_limit)
+            self.run_target(&self.cmd.main, self.cmd.mem_limit, self.cmd.time_limit, &buf)
         };
         compiler_fence(Ordering::SeqCst);
+
+        self.run_exit();
 
         ret_status
     }
 
-    fn count_time(&mut self) -> u32 {
+    fn count_time(&mut self, buf: &Vec<u8>) -> u32 {
         let t_start = time::Instant::now();
         for _ in 0..3 {
             if self.cmd.is_stdin {
                 self.fd.rewind();
             }
             if let Some(ref mut fs) = self.forksrv {
-                let status = fs.run();
+                let status = fs.run(&self.listen_sem, &buf);
                 if status == StatusType::Error {
                     self.rebind_forksrv();
                     return defs::SLOW_SPEED;
                 }
             } else {
-                self.run_target(&self.cmd.main, self.cmd.mem_limit, self.cmd.time_limit);
+                self.run_target(&self.cmd.main, self.cmd.mem_limit, self.cmd.time_limit, &buf);
             }
         }
         let used_t = t_start.elapsed();
@@ -348,9 +379,11 @@ impl Executor {
     }
 
     fn track(&mut self, id: usize, buf: &Vec<u8>, speed: u32) -> Vec<cond_stmt::CondStmt> {
+        let track_socket_path = format!("{}_{}", self.cmd.track_file_path, id);
+
         self.envs.insert(
-            defs::TRACK_OUTPUT_VAR.to_string(),
-            self.cmd.track_path.clone(),
+            defs::TRACK_FILE_PATH_VAR.to_string(),
+            track_socket_path.clone(),
         );
 
         let t_now: stats::TimeIns = Default::default();
@@ -363,10 +396,11 @@ impl Executor {
             config::MEM_LIMIT_TRACK,
             //self.cmd.time_limit *
             config::TIME_LIMIT_TRACK,
+            &buf,
         );
         compiler_fence(Ordering::SeqCst);
 
-        if ret_status != StatusType::Normal {
+        if !matches!(ret_status, StatusType::Normal|StatusType::Amp(_,_)) {
             error!(
                 "Crash or hang while tracking! -- {:?},  id: {}",
                 ret_status, id
@@ -374,19 +408,27 @@ impl Executor {
             return vec![];
         }
 
-        let mut cond_list = track::load_track_data(
-            Path::new(&self.cmd.track_path),
-            id as u32,
-            speed,
-            self.cmd.mode.is_pin_mode(),
-            self.cmd.enable_exploitation,
-        );
+        let (mut cond_list, load_paths) = load_track_data(Path::new(track_socket_path.as_str()), id as u32, speed, self.cmd.enable_exploitation);
 
-        let mut ind_dominator_offsets : HashMap<CmpId, Vec<TagSeg>> = HashMap::new();
+        for load_path in load_paths.iter() {
+            let mut cfg_file: Vec<u8> = Vec::new();
+            cfg_file.extend_from_slice(load_path.to_bytes());
+            cfg_file.extend(b".targets.json");
+
+            let cfg_path = Path::new(OsStr::from_bytes(&cfg_file));
+            if cfg_path.exists() {
+                let mut dyncfg = self.depot.cfg.write().unwrap();
+                dyncfg.append_file(cfg_path);
+            } else {
+                warn!("CFG file {:?} does not exist, ignoring", cfg_path);
+            }
+        }
+
+        let mut ind_dominator_offsets: HashMap<CmpId, Vec<TagSeg>> = HashMap::new();
         let mut ind_cond_list = vec![];
 
 
-        for (a,b) in cond_list.clone().into_iter().tuple_windows() {
+        for (a, b) in cond_list.clone().into_iter().tuple_windows() {
             let mut dyncfg = self.depot.cfg.write().unwrap();
             let edge = (a.base.cmpid, b.base.cmpid);
             let _is_new = dyncfg.add_edge(edge);
@@ -402,8 +444,8 @@ impl Executor {
             if b.base.last_callsite != 0 {
                 debug!("ADD Indirect edge {:?}: {}!!", edge, b.base.last_callsite);
                 dyncfg.set_edge_indirect(edge, b.base.last_callsite);
-                let dominators = 
-                  dyncfg.get_callsite_dominators(b.base.last_callsite);
+                let dominators =
+                    dyncfg.get_callsite_dominators(b.base.last_callsite);
                 let mut fixed_offsets = vec![];
                 for d in dominators {
                     if let Some(offsets) = ind_dominator_offsets.get(&d) {
@@ -417,7 +459,7 @@ impl Executor {
                 let mut fixed_cond = b.clone();
                 fixed_cond.offsets.append(&mut fixed_offsets);
                 let var_len = fixed_cond.variables.len();
-                for (i,v) in dyncfg.get_magic_bytes(edge) {
+                for (i, v) in dyncfg.get_magic_bytes(edge) {
                     if i < var_len - 1 {
                         fixed_cond.variables[i] = v;
                         debug!("FIX VAR {} to '{}'", i, v);
@@ -425,8 +467,6 @@ impl Executor {
                 }
                 ind_cond_list.push(fixed_cond);
             }
-
-            
         }
 
 
@@ -461,7 +501,16 @@ impl Executor {
         target: &(String, Vec<String>),
         mem_limit: u64,
         time_limit: u64,
+        input: &Vec<u8>,
     ) -> StatusType {
+
+        // println!("About to run {} {}", self.envs.iter().map(|p| format!("{}={}", p.0, p.1)).join(" "), target.0);
+
+        //AMP_FUZZ:
+        // 0. drain semaphore
+        self.listen_sem.drain();
+        compiler_fence(Ordering::SeqCst);
+
         let mut cmd = Command::new(&target.0);
         let mut child = cmd
             .args(&target.1)
@@ -477,7 +526,29 @@ impl Executor {
             .expect("Could not run target");
 
         let timeout = time::Duration::from_secs(time_limit);
-        let ret = match child.wait_timeout(timeout).unwrap() {
+
+        //AMP_FUZZ:
+        // 1. wait a little for semaphore
+        if !self.listen_sem.wait_timeout(&timeout) {
+            // if we have no success waiting for the semaphore
+            // kill the child and record a timeout
+            child.kill().expect("Could not send kill signal to child.");
+            child.wait().expect("Error during waiting for child.");
+            // below used to be StatusType::Timeout,
+            // but we don't care if the target is still running
+            return StatusType::Timeout;
+        }
+
+        // 2. if we have success, prepare the socket
+        let mut socket = UdpSocket::bind("0.0.0.0:0").expect("failed to bind fuzzer socket");
+
+        // 3. start thread to listen for output
+        let recv_thread = RecvThread::new(socket.try_clone().expect("Failed to clone socket"));
+
+        // 4. and send our input
+        socket.send_to(input, &self.cmd.target_addr).expect("failed to send input to target");
+
+        let mut ret = match child.wait_timeout(timeout).unwrap() {
             Some(status) => {
                 if let Some(status_code) = status.code() {
                     if (self.cmd.uses_asan && status_code == defs::MSAN_ERROR_CODE)
@@ -496,21 +567,42 @@ impl Executor {
                 // child hasn't exited yet
                 child.kill().expect("Could not send kill signal to child.");
                 child.wait().expect("Error during waiting for child.");
-                StatusType::Timeout
+                // below used to be StatusType::Timeout,
+                // but we don't care if the target is still running
+                StatusType::Normal
             }
         };
+
+        // Check number of received bytes
+        let output_len = recv_thread.stop();
+        if ret == StatusType::Normal && output_len > 0 {
+            ret = StatusType::Amp(self.branches.get_path_as_hash(), AmpByteCount {
+                bytes_in: UdpByteCount::from_l7(input.len()),
+                bytes_out: output_len,
+            });
+        }
+
         ret
     }
 
-    pub fn update_log(&mut self) {
+    pub fn finish_round(&mut self) {
+        self.sync_to_global();
         self.global_stats
             .write()
             .unwrap()
-            .sync_from_local(&mut self.local_stats);
+            .finish_round();
 
         self.t_conds.clear();
         self.tmout_cnt = 0;
         self.invariable_cnt = 0;
         self.last_f = defs::UNREACHABLE;
+    }
+
+    pub fn sync_to_global(&mut self) {
+        self.global_stats
+            .write()
+            .unwrap()
+            .sync_from_local(&mut self.local_stats);
+        self.local_stats.clear();
     }
 }

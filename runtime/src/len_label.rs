@@ -6,13 +6,14 @@ use lazy_static::lazy_static;
 use std::sync::Mutex;
 
 const NORMAL_LABEL_WITDH: u32 = 22;
-const MAX_NORMAL_LABEL: DfsanLabel = (1 << 22) - 1;
-const MAX_LEN_LABEL: DfsanLabel = (1 << 10) - 1;
+const MAX_NORMAL_LABEL: DfsanLabel = (1 << NORMAL_LABEL_WITDH) - 1;
+const MAX_LEN_LABEL: DfsanLabel = (1 << (32 - NORMAL_LABEL_WITDH)) - 1;
 const NORMAL_LABEL_MASK: DfsanLabel = MAX_NORMAL_LABEL;
 const NORMAL_LABEL_MASK_USIZE: usize = MAX_NORMAL_LABEL as usize;
 const LEN_LABEL_MASK: DfsanLabel = MAX_LEN_LABEL;
 
 lazy_static! {
+    // vec of (offset, size) pairs
     pub static ref LEN_INFO: Mutex<Vec<(u32, u32)>> = Mutex::new(vec![(0, 1)]);
 }
 

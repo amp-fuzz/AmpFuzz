@@ -3,24 +3,12 @@ use memmap;
 use std::{fs::File, io::prelude::*, path::Path};
 use twoway;
 
-static CHECK_CRASH_MSG: &str = r#"
-If your system is configured to send core dump, there will be an
-extended delay after the program crash, which might makes crash to
-misinterpreted as timeouts.
-You can modify /proc/sys/kernel/core_pattern to disable it by:
-# echo core | sudo tee /proc/sys/kernel/core_pattern
-"#;
-
-static CORE_PATTERN_FILE: &str = "/proc/sys/kernel/core_pattern";
-
-fn check_crash_handling() {
-    let mut f = File::open(CORE_PATTERN_FILE).unwrap();
-    let mut buffer = String::new();
-    f.read_to_string(&mut buffer).unwrap();
-    // if buffer.trim() != "core" {
-    if buffer.starts_with('|') {
-        panic!(CHECK_CRASH_MSG);
+fn disable_core_dumps() {
+    unsafe {
+        let core_rlimit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        libc::setrlimit(libc::RLIMIT_CORE, &core_rlimit);
     }
+    warn!("Disabling coredumps by setting RLIMIT_CORE to 0 (refer to getrlimit (2) for more information).")
 }
 
 fn check_target_binary(target: &str) {
@@ -81,7 +69,7 @@ fn check_io_dir(in_dir: &str, out_dir: &str) {
 
 pub fn check_dep(in_dir: &str, out_dir: &str, cmd: &CommandOpt) {
     check_io_dir(in_dir, out_dir);
-    check_crash_handling();
+    disable_core_dumps();
     check_fast(&cmd.main.0);
     if !cmd.mode.is_pin_mode() {
         check_track_llvm(&cmd.track.0);

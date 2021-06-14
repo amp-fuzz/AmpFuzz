@@ -51,9 +51,11 @@ add_custom_command(OUTPUT ${dfsan_abilist_filename}
                     ${CMAKE_COMMAND} -E make_directory ${dfsan_abilist_dir}
                    COMMAND
                      cat ${CMAKE_CURRENT_SOURCE_DIR}/done_abilist.txt
-                         ${CMAKE_CURRENT_SOURCE_DIR}/libc_ubuntu1404_abilist.txt
+                         ${CMAKE_CURRENT_SOURCE_DIR}/libc_abilist.txt
                          > ${dfsan_abilist_filename}
-                   DEPENDS done_abilist.txt libc_ubuntu1404_abilist.txt)
+                   COMMAND
+                     cp ${dfsan_abilist_filename} ${ANGORA_RULE_DIR}
+                   DEPENDS done_abilist.txt libc_abilist.txt)
 add_dependencies(dfsan dfsan_abilist)
 install(FILES ${dfsan_abilist_filename}
         DESTINATION ${ANGORA_RULE_DIR})

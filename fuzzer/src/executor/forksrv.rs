@@ -14,6 +14,9 @@ use std::{
     process::{Command, Stdio},
     time::Duration,
 };
+use angora_common::listen_semaphore;
+use angora_common::listen_semaphore::ShmListenSemaphore;
+use std::net::UdpSocket;
 
 // Just meaningless value for forking a new child
 static FORKSRV_NEW_CHILD: [u8; 4] = [8, 8, 8, 8];
@@ -24,6 +27,8 @@ pub struct Forksrv {
     pub socket: UnixStream,
     uses_asan: bool,
     is_stdin: bool,
+    target_addr: String,
+    pub time_limit: Option<Duration>
 }
 
 impl Forksrv {
@@ -36,6 +41,7 @@ impl Forksrv {
         uses_asan: bool,
         time_limit: u64,
         mem_limit: u64,
+        target_addr: &str,
     ) -> Forksrv {
         debug!("socket_path: {:?}", socket_path);
         let listener = match UnixListener::bind(socket_path) {
@@ -47,7 +53,7 @@ impl Forksrv {
         };
 
         let mut envs_fk = envs.clone();
-        envs_fk.insert(ENABLE_FORKSRV.to_string(), String::from("TRUE"));
+        envs_fk.insert(ENABLE_FORKSRV.to_string(), String::from("TRUE")); // <- TODO: Useless?
         envs_fk.insert(FORKSRV_SOCKET_PATH_VAR.to_string(), socket_path.to_owned());
         match Command::new(&target.0)
             .args(&target.1)
@@ -90,10 +96,12 @@ impl Forksrv {
             socket,
             uses_asan,
             is_stdin,
+            target_addr: target_addr.to_owned(),
+            time_limit: Some(Duration::from_secs(time_limit)),
         }
     }
 
-    pub fn run(&mut self) -> StatusType {
+    pub fn run(&mut self, listen_sem: &ShmListenSemaphore, input: &Vec<u8>) -> StatusType {
         if self.socket.write(&FORKSRV_NEW_CHILD).is_err() {
             warn!("Fail to write socket!!");
             return StatusType::Error;
@@ -123,6 +131,17 @@ impl Forksrv {
                 return StatusType::Error;
             }
         }
+
+        //TODO AMP_FUZZ:
+        // 1. wait for semaphore
+        listen_sem.wait();
+        // 2. send packet(s)
+        let mut socket = UdpSocket::bind("0.0.0.0:0").expect("failed to bind fuzzer socket");
+        socket.send_to(input, &self.target_addr).expect("failed to send input to target");
+        // 3. listen for output
+        socket.set_read_timeout(self.time_limit);
+        let mut output = [0; 8192];
+        let output_len = socket.recv(&mut output);
 
         buf = vec![0; 4];
 
@@ -155,7 +174,7 @@ impl Forksrv {
                 while let Err(_) = self.socket.read(tmout_buf) {
                     warn!("Killing timed out process");
                 }
-                return StatusType::Timeout;
+                return StatusType::Normal;//Timeout;
             }
         }
     }

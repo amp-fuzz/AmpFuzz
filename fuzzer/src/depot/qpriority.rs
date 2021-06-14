@@ -8,12 +8,12 @@ const INIT_DISTANCE: u32 = std::u32::MAX;
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub struct QPriority(u16, u32);
+
 impl QPriority {
     pub fn inc(&self, op: u32) -> Self {
-        if op == defs::COND_AFL_OP {
-            self.afl_inc()
-        } else {
-            self.base_inc()
+        match op {
+            defs::COND_AFL_OP => self.afl_inc(),
+            _ => self.base_inc()
         }
     }
 
@@ -34,16 +34,20 @@ impl QPriority {
     }
 
     pub fn init_distance(op: u32, distance: u32) -> Self {
-        if op == defs::COND_AFL_OP {
-            Self::afl_init(distance)
-        } else {
-            Self::base_init(distance)
+        match op {
+            defs::COND_AFL_OP => Self::afl_init(distance),
+            defs::COND_AMP_OP => Self::amp_init(distance),
+            _ => Self::base_init(distance)
         }
     }
 
 
     fn base_init(distance: u32) -> Self {
         QPriority(INIT_PRIORITY, distance)
+    }
+
+    fn amp_init(distance: u32) -> Self {
+        QPriority(INIT_PRIORITY, 0)
     }
 
     fn afl_init(distance: u32) -> Self {

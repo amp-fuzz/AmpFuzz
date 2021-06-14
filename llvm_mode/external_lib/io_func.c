@@ -3,7 +3,7 @@
 
   to write custom functions, modify custom/angora_abilist.txt first
  */
-
+#define _GNU_SOURCE
 #include <assert.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -16,6 +16,8 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 
 #include "./ffds.h"
 #include "./len_label.h"
@@ -25,6 +27,7 @@
 static int granularity = 1; // byte level
 
 extern void __angora_track_fini_rs();
+extern int is_fuzz_fd(int sockfd);
 
 __attribute__((destructor(0))) void __angora_track_fini(void) {
   __angora_track_fini_rs();
@@ -38,14 +41,16 @@ __attribute__((destructor(0))) void __angora_track_fini(void) {
 #define remove_fuzzing_fd __angora_io_remove_fd
 #define remove_fuzzing_ffd __angora_io_remove_pfile
 
+#define MAX_TAINT 512
+
 static void assign_taint_labels(void *buf, long offset, size_t size) {
-  for (size_t i = 0; i < size; i += granularity) {
+  for (size_t i = 0; (i < size) && ((offset + i) < MAX_TAINT); i += granularity) {
     // start from 0
     dfsan_label L = dfsan_create_label(offset + i);
     if (size < i + granularity)
-      dfsan_set_label(L, (char *)(buf) + i, size - i);
+      dfsan_set_label(L, (char *) (buf) + i, size - i);
     else
-      dfsan_set_label(L, (char *)(buf) + i, granularity);
+      dfsan_set_label(L, (char *) (buf) + i, granularity);
   }
 }
 
@@ -75,10 +80,10 @@ __dfsw_open(const char *path, int oflags, dfsan_label path_label,
   int mode = 0;
 
   if (__OPEN_NEEDS_MODE(oflags)) {
-      va_list arg;
-      va_start(arg, ret_label);
-      mode = va_arg(arg, int);
-      va_end(arg);
+    va_list arg;
+    va_start(arg, ret_label);
+    mode = va_arg(arg, int);
+    va_end(arg);
   }
   int fd = open(path, oflags, mode);
 #ifdef DEBUG_INFO
@@ -491,7 +496,7 @@ __dfsw_stat(const char *path, struct stat *buf, dfsan_label path_label,
   if (ret >= 0) {
     dfsan_set_label(0, buf, sizeof(struct stat));
     dfsan_label lb = __angora_get_sp_label(0, 1);
-    dfsan_set_label(lb, (char *)&(buf->st_size), sizeof(buf->st_size));
+    dfsan_set_label(lb, (char *) &(buf->st_size), sizeof(buf->st_size));
   }
   *ret_label = 0;
   return ret;
@@ -508,7 +513,7 @@ __dfsw___xstat(int vers, const char *path, struct stat *buf,
   if (ret >= 0) {
     dfsan_set_label(0, buf, sizeof(struct stat));
     dfsan_label lb = __angora_get_sp_label(0, 1);
-    dfsan_set_label(lb, (char *)&(buf->st_size), sizeof(buf->st_size));
+    dfsan_set_label(lb, (char *) &(buf->st_size), sizeof(buf->st_size));
   }
   *ret_label = 0;
   return ret;
@@ -524,7 +529,7 @@ __dfsw_fstat(int fd, struct stat *buf, dfsan_label fd_label,
   if (ret >= 0) {
     dfsan_set_label(0, buf, sizeof(struct stat));
     dfsan_label lb = __angora_get_sp_label(0, 1);
-    dfsan_set_label(lb, (char *)&(buf->st_size), sizeof(buf->st_size));
+    dfsan_set_label(lb, (char *) &(buf->st_size), sizeof(buf->st_size));
   }
 
   *ret_label = 0;
@@ -542,7 +547,7 @@ __dfsw___fxstat(int vers, const int fd, struct stat *buf,
   if (ret >= 0) {
     dfsan_set_label(0, buf, sizeof(struct stat));
     dfsan_label lb = __angora_get_sp_label(0, 1);
-    dfsan_set_label(lb, (char *)&(buf->st_size), sizeof(buf->st_size));
+    dfsan_set_label(lb, (char *) &(buf->st_size), sizeof(buf->st_size));
   }
   *ret_label = 0;
   return ret;
@@ -558,7 +563,7 @@ __dfsw_lstat(const char *path, struct stat *buf, dfsan_label path_label,
   if (ret >= 0) {
     dfsan_set_label(0, buf, sizeof(struct stat));
     dfsan_label lb = __angora_get_sp_label(0, 1);
-    dfsan_set_label(lb, (char *)&(buf->st_size), sizeof(buf->st_size));
+    dfsan_set_label(lb, (char *) &(buf->st_size), sizeof(buf->st_size));
   }
 
   *ret_label = 0;
@@ -576,7 +581,97 @@ __dfsw___lxstat(int vers, const char *path, struct stat *buf,
   if (ret >= 0) {
     dfsan_set_label(0, buf, sizeof(struct stat));
     dfsan_label lb = __angora_get_sp_label(0, 1);
-    dfsan_set_label(lb, (char *)&(buf->st_size), sizeof(buf->st_size));
+    dfsan_set_label(lb, (char *) &(buf->st_size), sizeof(buf->st_size));
+  }
+  *ret_label = 0;
+  return ret;
+}
+
+__attribute__((visibility("default"))) ssize_t
+__dfsw_recv(int sockfd, void *buf, size_t len, int flags,
+            dfsan_label sockfd_label, dfsan_label buf_label,
+            dfsan_label len_label, dfsan_label flags_label,
+            dfsan_label *ret_label) {
+  ssize_t ret = recv(sockfd, buf, len, flags);
+#ifdef DEBUG_INFO
+  fprintf(stderr, "### fread %p,range is %ld, %ld  --  (size %d, count %d)\n",
+          fd, offset, ret, size, count);
+#endif
+  if (is_fuzz_fd(sockfd) && ret >= 0) {
+    assign_taint_labels(buf, 0, len);
+    *ret_label = __angora_get_sp_label(0, ret);
+  } else {
+    *ret_label = 0;
+  }
+  return ret;
+}
+
+__attribute__((visibility("default"))) ssize_t
+__dfsw_recvfrom(int sockfd, void *buf, size_t len, int flags,
+                struct sockaddr *src_addr, socklen_t *addrlen,
+                dfsan_label sockfd_label, dfsan_label buf_label,
+                dfsan_label len_label, dfsan_label flags_label,
+                dfsan_label src_addr_label, dfsan_label addrlen_label,
+                dfsan_label *ret_label) {
+  ssize_t ret = recvfrom(sockfd, buf, len, flags, src_addr, addrlen);
+#ifdef DEBUG_INFO
+  fprintf(stderr, "### fread %p,range is %ld, %ld  --  (size %d, count %d)\n",
+          fd, offset, ret, size, count);
+#endif
+  if (is_fuzz_fd(sockfd) && ret >= 0) {
+    assign_taint_labels(buf, 0, len);
+    *ret_label = __angora_get_sp_label(0, ret);
+  } else {
+    *ret_label = 0;
+  }
+  return ret;
+}
+
+__attribute__((visibility("default"))) ssize_t
+__dfsw_recvmsg(int sockfd, struct msghdr *message, int flags,
+               dfsan_label sockfd_label, dfsan_label message_label,
+               dfsan_label flags_label, dfsan_label *ret_label) {
+  ssize_t ret = recvmsg(sockfd, message, flags);
+#ifdef DEBUG_INFO
+  fprintf(stderr, "### fread %p,range is %ld, %ld  --  (size %d, count %d)\n",
+          fd, offset, ret, size, count);
+#endif
+  if (is_fuzz_fd(sockfd) && ret >= 0) {
+    for (size_t i = 0, tainted = 0; i < message->msg_iovlen; i++) {
+      struct iovec *cur_iov = &message->msg_iov[i];
+      assign_taint_labels(cur_iov->iov_base, tainted, cur_iov->iov_len);
+      tainted += cur_iov->iov_len;
+    }
+    *ret_label = __angora_get_sp_label(0, ret);
+  } else {
+    *ret_label = 0;
+  }
+  return ret;
+}
+
+__attribute__((visibility("default"))) int
+__dfsw_recvmmsg(int sockfd, struct mmsghdr *msgvec, unsigned int vlen,
+                int flags, struct timespec *timeout,
+                dfsan_label sockfd_label, dfsan_label message_label,
+                dfsan_label vlen_label, dfsan_label flags_label,
+                dfsan_label timeout_label, dfsan_label *ret_label) {
+  int ret = recvmmsg(sockfd, msgvec, vlen, flags, timeout);
+#ifdef DEBUG_INFO
+  fprintf(stderr, "### fread %p,range is %ld, %ld  --  (size %d, count %d)\n",
+          fd, offset, ret, size, count);
+#endif
+  if (is_fuzz_fd(sockfd) && ret >= 0) {
+    //WARNING: If multiple messages are received, they will receive the same taint (as would happen in recvmsg was called multiple times)
+    for (int j = 0; j < ret && j < vlen; j++) {
+      struct mmsghdr *cur_msg = &msgvec[j];
+      // message length is stored in mmsghdr -> set taint-value there
+      dfsan_set_label(__angora_get_sp_label(0, cur_msg->msg_len), &cur_msg->msg_len, sizeof(cur_msg->msg_len));
+      for (size_t i = 0, tainted = 0; i < cur_msg->msg_hdr.msg_iovlen; i++) {
+        struct iovec *cur_iov = &cur_msg->msg_hdr.msg_iov[i];
+        assign_taint_labels(cur_iov->iov_base, tainted, cur_iov->iov_len);
+        tainted += cur_iov->iov_len;
+      }
+    }
   }
   *ret_label = 0;
   return ret;

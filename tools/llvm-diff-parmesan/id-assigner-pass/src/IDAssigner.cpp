@@ -2,7 +2,7 @@
  * Based on IDAssigner by Elia Geretto
  *
  * */
- 
+
 #include "parmesan/IDAssigner.h"
 
 #include "llvm/ADT/Statistic.h"
@@ -34,12 +34,12 @@ STATISTIC(NumIDs, "The # of IDs generated");
 static cl::opt<bool> ClEmitInfo(
     "idassign-emit-info",
     cl::desc("Write the debug info associated with the IDs to a file"),
-    cl::init(false), cl::Hidden);
+    cl::init(true), cl::Hidden);
 
 static cl::opt<std::string> ClInfoFile(
     "idassign-info-file",
     cl::desc("File that will contain the debug information in CSV format"),
-    cl::init("-"), cl::Hidden);
+    cl::init("id_assign_info.csv"), cl::Hidden);
 
 static cl::opt<bool> ClEmitCfg(
     "idassign-emit-cfg",
@@ -81,13 +81,13 @@ public:
 char IDAssigner::ID = 0;
 IDAssigner::IDAssigner() : ModulePass(ID) {}
 IDAssigner::~IDAssigner() = default;
-std::set<std::tuple<IDAssigner::IdentifierType, IDAssigner::IdentifierType>> CfgEdges;
+std::set<std::tuple<IDAssigner::IdentifierType, IDAssigner::IdentifierType>> CfgEdges; // CFG-Edges as Parmesan-IDs
 std::set<std::string> TraceFunctions = {"__angora_trace_cmp", "__angora_trace_switch", "__dfsw___angora_trace_cmp_tt", "__dfsw___angora_trace_exploit_val_tt", "__dfsw___angora_trace_switch_tt", "__dfsw___angora_trace_fn_tt"};
 
 Type *VoidTy;
 IntegerType *Int32Ty;
 FunctionType *ParmeSanDummyCallTy;
-Constant *ParmeSanDummyCall;
+FunctionCallee ParmeSanDummyCall;
 
 void IDAssigner::collectCallSiteDominators(Function *F) {
     for (auto &BB : *F) {
@@ -130,8 +130,8 @@ void IDAssigner::collectCallSiteDominators(Function *F) {
                     }
 
                   }
-                  CallSiteDominatorsMap[PrevCallSiteId] = CSDominatorCmpIds; 
-                  
+                  CallSiteDominatorsMap[PrevCallSiteId] = CSDominatorCmpIds;
+
               }
           }
       }
@@ -145,10 +145,10 @@ IDAssigner::CmpIdType IDAssigner::getAngoraCmpIdForBB(BasicBlock *BB) {
 }
 
 bool IDAssigner::runOnModule(Module &M) {
-  IdentifierGenerator = make_unique<IDGenerator>();
+  IdentifierGenerator = std::make_unique<IDGenerator>();
 
 
-  std::set<IDAssigner::IdentifierType> cmpBbSet;
+  std::set<IDAssigner::IdentifierType> cmpBbSet; // !!!TODO!!! SHOULD THIS BE RESET FOR EVERY FUNCTION? OTHERWISE IT CAN CONTAIN IDs OF MULTIPLE FUNCTIONS IF ITERATION ORDER IS NON-DETERMINISTIC
   for (auto &F : M) {
     IdMap[&F] = IdentifierGenerator->getUniqueIdentifier();
     for (Value &Arg : F.args()) {
@@ -194,7 +194,7 @@ bool IDAssigner::runOnModule(Module &M) {
 
                       // Store BB to Angora CMP mapping
                       for (auto bb_id: cmpBbSet) {
-                        IdToAngoraMap[bb_id] = cmpId;
+                        IdToAngoraMap[bb_id] = cmpId; //!!! TODO !!! STORES BBs COLLECTED SO FAR. DEPENDS ON ITERATION ORDER??
                       }
 
                       // Store Angora CMP to BB id mapping
@@ -273,7 +273,7 @@ void IDAssigner::collectPreviousIndirectBranch(Instruction *Inst, SmallPtrSet<In
            collectPreviousIndirectBranch(Term, Result, Seen);
         }
     }
-    
+
 }
 
 void IDAssigner::getAnalysisUsage(AnalysisUsage &Info) const {
@@ -394,7 +394,7 @@ const IDAssigner::CmpsCfg IDAssigner::getCmpCfg() const {
 // Stolen from AFLGo to be (somewhat) compatible with the same targets file
 // https://github.com/aflgo/aflgo/blob/master/llvm_mode/afl-llvm-pass.so.cc
 void IDAssigner::addCustomTargetsFromFile(const std::string Path, Module *M) {
-    
+
     if (Path.empty())
         return;
 

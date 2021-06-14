@@ -6,9 +6,10 @@ use std::{
     io::Write,
     sync::{Arc, RwLock},
 };
+use std::fs::File;
 
 pub fn show_stats(
-    log_f: &mut fs::File,
+    log_file_writer: &mut csv::Writer<File>,
     depot: &Arc<Depot>,
     gb: &Arc<GlobalBranches>,
     stats: &Arc<RwLock<ChartStats>>,
@@ -28,12 +29,12 @@ pub fn show_stats(
     {
         let s = stats.read().expect("Could not read from stats.");
         println!("{}", *s);
-        writeln!(log_f, "{}", s.mini_log()).expect("Could not write minilog.");
+        log_file_writer.write_record(s.mini_log()).expect("Could not write minilog.");
+        log_file_writer.flush();
         write!(
             log_s,
             "{}",
             serde_json::to_string(&*s).expect("Could not serialize!")
-        )
-        .expect("Unable to write!");
+        ).expect("Unable to write!");
     }
 }

@@ -2,7 +2,7 @@
 members = [
         "common",
         "fuzzer",
+        "runtime_common",
         "runtime_fast",
         "runtime",
-        "tools/log_reader",
 ]

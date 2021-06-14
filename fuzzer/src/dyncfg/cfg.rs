@@ -6,6 +6,9 @@ use petgraph::visit::{Reversed, Bfs, Dfs};
 use petgraph::{Incoming, Outgoing};
 use angora_common::tag::TagSeg;
 use super::fparse::CfgFile;
+use std::path::Path;
+use std::ffi::OsString;
+use crate::dyncfg::fparse::parse_targets_file;
 
 pub type CmpId = u32;
 pub type CallSiteId = u32;
@@ -27,8 +30,8 @@ pub struct ControlFlowGraph {
     callsite_dominators: HashMap<CallSiteId, HashSet<CmpId>>,
     dominator_cmps: HashSet<CmpId>,
     magic_bytes: HashMap<Edge, FixedBytes>,
+    paths: HashSet<OsString>,
 }
-
 
 
 // A CFG of branches (CMPs)
@@ -48,6 +51,7 @@ impl ControlFlowGraph {
             callsite_dominators: data.callsite_dominators,
             dominator_cmps,
             magic_bytes: HashMap::new(),
+            paths: HashSet::new(),
         };
 
         for e in data.edges {
@@ -67,6 +71,20 @@ impl ControlFlowGraph {
         result
     }
 
+    pub fn append_file(&mut self, path: &Path) {
+        if self.paths.insert(path.as_os_str().to_owned()) {
+            debug!("Extending CFG with data from {:?}", path);
+            let rdata = parse_targets_file(path);
+            if let Ok(data) = rdata {
+                self.targets.extend(data.targets);
+                self.callsite_dominators.extend(data.callsite_dominators);
+                for e in data.edges {
+                    self.add_edge(e);
+                }
+            }
+        }
+    }
+
     pub fn set_edge_indirect(&mut self, edge: Edge, callsite: CallSiteId) {
         self.indirect_edges.insert(edge);
         let entry = self.callsite_edges.entry(callsite).or_insert(HashSet::new());
@@ -77,7 +95,7 @@ impl ControlFlowGraph {
         let mut fixed = vec![];
         let mut indices = HashSet::new();
         for tag in offsets {
-            for i in tag.begin .. tag.end {
+            for i in tag.begin..tag.end {
                 indices.insert(i as usize);
             }
         }
@@ -94,7 +112,7 @@ impl ControlFlowGraph {
         return vec![];
     }
 
-    pub fn dominates_indirect_call(&self, cmp: CmpId) -> bool{
+    pub fn dominates_indirect_call(&self, cmp: CmpId) -> bool {
         self.dominator_cmps.contains(&cmp)
     }
 
@@ -126,7 +144,7 @@ impl ControlFlowGraph {
 
         // 1) Get score for dst
         let dst_score = self._score_for_cmp(dst);
-        
+
         // 2) if src_score changed
         let old_src_score = self._score_for_cmp(src);
 
@@ -146,7 +164,6 @@ impl ControlFlowGraph {
 
 
     fn propagate_score(&mut self, cmp: CmpId) {
-
         let rev_graph = Reversed(&self.graph);
         let mut visitor = Bfs::new(rev_graph, cmp);
 
@@ -163,19 +180,18 @@ impl ControlFlowGraph {
                 self.graph.add_edge(p, visited, new_score);
             }
         }
-        
     }
-    
+
 
     pub fn has_edge(&self, edge: Edge) -> bool {
-        let (a,b) = edge;
+        let (a, b) = edge;
         self.graph.contains_edge(a, b)
     }
 
     pub fn has_score(&self, cmp: CmpId) -> bool {
         if self._score_for_cmp(cmp) != UNDEF_SCORE {
             return true;
-        } 
+        }
         false
     }
 
@@ -190,7 +206,7 @@ impl ControlFlowGraph {
             return UNDEF_SCORE;
         }
         let vals = ovals.into_iter().filter(|v| *v != UNDEF_SCORE);
-        let fvals : Vec<f64> = vals.into_iter().map(|x| x as f64).collect();
+        let fvals: Vec<f64> = vals.into_iter().map(|x| x as f64).collect();
         return mean::harmonic(fvals.as_slice()) as u32 + 1;
     }
 
@@ -210,7 +226,7 @@ impl ControlFlowGraph {
             return UNDEF_SCORE;
         }
         let vals = ovals.into_iter().filter(|v| *v != UNDEF_SCORE);
-        let vals_norm = vals.into_iter().map(|v| if v == TARGET_SCORE {1} else {v});
+        let vals_norm = vals.into_iter().map(|v| if v == TARGET_SCORE { 1 } else { v });
         vals_norm.sum()
     }
 
@@ -279,15 +295,13 @@ impl ControlFlowGraph {
                         equal = false;
                         break;
                     }
-                } 
+                }
             }
             return equal;
         }
 
         true
     }
-
-  
 }
 
 #[cfg(test)]
@@ -299,13 +313,11 @@ mod tests {
         // Create CFG
         let targets = HashSet::new();
         let mut cfg = ControlFlowGraph::new(targets);
-        let edges = vec![(10,20), (20,30), (10,40), (40,50), (20,30)];
+        let edges = vec![(10, 20), (20, 30), (10, 40), (40, 50), (20, 30)];
 
-       for e in edges.clone() {
+        for e in edges.clone() {
             cfg.add_edge(e);
         }
-
     }
-    
 }
 

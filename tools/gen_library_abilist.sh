@@ -24,14 +24,5 @@ if [ "$NM" = "" ]; then
     exit 1
 fi
 
-echo "# $1" | grep 'so$'
-if [ $? -eq 0 ]
-then
-    # echo "dynamic library.."
-    nm -D --defined-only $1 | grep " T " | sed 's/^[0-9a-z]\+ T /fun:/g; s/$/=uninstrumented/g'
-    nm -D --defined-only $1 | grep " T " | sed "s/^[0-9a-z]\+ T /fun:/g; s/$/=$2/g"
-else
-    # echo "static library.."
-    nm --defined-only $1 | grep " T " | sed 's/^[0-9a-z]\+ T /fun:/g; s/$/=uninstrumented/g'
-    nm --defined-only $1 | grep " T " | sed "s/^[0-9a-z]\+ T /fun:/g; s/$/=$2/g"
-fi
+
+(nm --defined-only $1; nm -D --defined-only $1) 2> /dev/null|sed -n 's/[0-9a-f]\+ [TtWw] \(.*\)$/\1/g;T;p'|sed -n 'p;s/@.*//g;T;p'|sort -u|sed -n 's/^/fun:/;h;s/$/=uninstrumented/;p;x;s/$/='"$2"'/;p'

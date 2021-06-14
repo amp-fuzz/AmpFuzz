@@ -1,25 +1,59 @@
 use super::filter;
-use super::load_pin_data::get_log_data_pin;
 use crate::{
     cond_stmt::{CondState, CondStmt},
     mut_input,
 };
 use angora_common::{defs, tag::TagSeg};
-use runtime::get_log_data;
-use std::{collections::HashMap, io, path::Path};
+use std::{collections::HashMap, io, path::Path, fs};
+use angora_common::log_data::{LogData, LogMsg};
+use bincode::deserialize_from;
+use std::collections::HashSet;
+use std::ffi::CString;
+
+pub fn get_log_data(path: &Path) -> io::Result<LogData> {
+    let f = fs::File::open(path)?;
+    if f.metadata().unwrap().len() == 0 {
+        return Err(io::Error::new(io::ErrorKind::Other, "Could not find any interesting constraint!, Please make sure taint tracking works or running program correctly."));
+    }
+    let mut reader = io::BufReader::new(f);
+    let mut data = LogData::new();
+
+    loop {
+        let msg: bincode::Result<LogMsg> = deserialize_from(&mut reader);
+        match msg {
+            Ok(msg) => {
+                match msg {
+                    LogMsg::Tag { lb, tag } => {
+                        debug!("Rcv'd tag {:?}", lb);
+                        data.tags.insert(lb, tag);
+                    }
+                    LogMsg::MagicBytes { i, bytes } => {
+                        debug!("Rcv'd MagicBytes {:?}", bytes);
+                        data.magic_bytes.insert(i - 1, bytes);
+                    }
+                    LogMsg::Cond { cond } => {
+                        debug!("Rcv'd cond {:?}", cond);
+                        data.cond_list.push(cond);
+                    }
+                    LogMsg::Load { path } => {
+                        debug!("Rcv'd load {:?}", path);
+                        data.load_paths.insert(path);
+                    }
+                }
+            }
+            Err(_) => {
+                break;
+            }
+        }
+    }
+    Ok(data)
+}
 
 pub fn read_and_parse(
     out_f: &Path,
-    is_pin_mode: bool,
     enable_exploitation: bool,
-) -> io::Result<Vec<CondStmt>> {
-    let log_data = {
-        if is_pin_mode {
-            get_log_data_pin(out_f)?
-        } else {
-            get_log_data(out_f)?
-        }
-    };
+) -> io::Result<(Vec<CondStmt>, HashSet<CString>)> {
+    let log_data = get_log_data(out_f)?;
 
     let mut cond_list: Vec<CondStmt> = Vec::new();
     // assign taint labels and magic_bytes to cond list
@@ -39,7 +73,7 @@ pub fn read_and_parse(
 
         cond_list.push(cond);
     }
-    Ok(cond_list)
+    Ok((cond_list, log_data.load_paths))
 }
 
 fn get_offsets_and_variables(
@@ -78,14 +112,13 @@ pub fn load_track_data(
     out_f: &Path,
     id: u32,
     speed: u32,
-    is_pin_mode: bool,
     enable_exploitation: bool,
-) -> Vec<CondStmt> {
-    let mut cond_list = match read_and_parse(out_f, is_pin_mode, enable_exploitation) {
+) -> (Vec<CondStmt>, HashSet<CString>) {
+    let (mut cond_list, load_paths) = match read_and_parse(out_f, enable_exploitation) {
         Result::Ok(val) => val,
         Result::Err(err) => {
             error!("parse track file error!! {:?}", err);
-            vec![]
+            (vec![], HashSet::new())
         }
     };
 
@@ -99,5 +132,5 @@ pub fn load_track_data(
 
     filter::filter_cond_list(&mut cond_list);
 
-    cond_list
+    (cond_list, load_paths)
 }

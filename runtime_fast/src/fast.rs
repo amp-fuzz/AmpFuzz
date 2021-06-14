@@ -1,7 +1,17 @@
 use super::{shm_conds, forkcli, shm_branches};
-use std::ops::DerefMut;
+use std::ops::{DerefMut, Deref};
+
+use lazy_static::lazy_static;
 
 use std::sync::Once;
+use std::os::raw::c_int;
+use std::{collections::HashSet, sync::Mutex};
+use std::env;
+
+use libc::*;
+use std::ffi::{CStr, CString};
+
+pub use runtime_common::runtime_hooks::*;
 
 static START: Once = Once::new();
 
@@ -12,6 +22,7 @@ fn fast_init() {
         forkcli::start_forkcli();
     });
 }
+
 
 #[no_mangle]
 pub extern "C" fn __angora_trace_cmp(
@@ -45,4 +56,39 @@ pub extern "C" fn __angora_trace_switch(cmpid: u32, context: u32, condition: u64
         _ => {}
     }
     condition
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __angora_dlopen(filename: *const c_char, flag: c_int) -> *mut c_void {
+    let mut filename_modified: Vec<u8> = Vec::new();
+    filename_modified.extend_from_slice(CStr::from_ptr(filename).to_bytes());
+    filename_modified.extend(b".fast\0");
+    let mut lib = dlopen(CStr::from_bytes_with_nul_unchecked(&filename_modified).as_ptr(), flag);
+    if lib.is_null() {
+        lib = dlopen(filename, flag);
+    }
+    lib
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __angora_dlmopen(lmid: Lmid_t, filename: *const c_char, flag: c_int) -> *mut c_void {
+    let mut filename_modified: Vec<u8> = Vec::new();
+    filename_modified.extend_from_slice(CStr::from_ptr(filename).to_bytes());
+    filename_modified.extend(b".fast\0");
+    let mut lib = dlmopen(lmid, CStr::from_bytes_with_nul_unchecked(&filename_modified).as_ptr(), flag);
+    if lib.is_null() {
+        lib = dlmopen(lmid, filename, flag);
+    }
+    lib
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __angora_dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void {
+    dlsym(handle, symbol)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn __angora_dlvsym(handle: *mut c_void, symbol: *const c_char, version: *const c_char) -> *mut c_void {
+    //TODO: libc crate does not contain dlvsym -> version is currently ignored
+    dlsym(handle, symbol)
 }

@@ -1,15 +1,22 @@
 use super::*;
 use crate::{cond_stmt::CondStmt, executor::StatusType, fuzz_type::FuzzType};
+use crate::byte_count::{UdpByteCount, AmpByteCount};
+use std::cmp::max;
+use crate::branches::PathAmplification;
 
 #[derive(Default)]
 pub struct LocalStats {
     pub fuzz_type: FuzzType,
 
+    pub num_exec_round: Counter,
     pub num_exec: Counter,
     pub num_inputs: Counter,
     pub num_hangs: Counter,
     pub num_crashes: Counter,
+    pub num_amps: Counter,
 
+    pub best_amp: AmpByteCount,
+    pub path_amplification: PathAmplification,
     pub track_time: TimeDuration,
     pub start_time: TimeIns,
 
@@ -21,6 +28,7 @@ impl LocalStats {
     pub fn register(&mut self, cond: &CondStmt) {
         self.fuzz_type = cond.get_fuzz_type();
         self.clear();
+        self.num_exec_round = Default::default();
     }
 
     pub fn clear(&mut self) {
@@ -28,7 +36,10 @@ impl LocalStats {
         self.num_inputs = Default::default();
         self.num_hangs = Default::default();
         self.num_crashes = Default::default();
+        self.num_amps = Default::default();
 
+        self.best_amp = AmpByteCount::default();
+        self.path_amplification = PathAmplification::default();
         self.start_time = Default::default();
         self.track_time = Default::default();
     }
@@ -43,6 +54,16 @@ impl LocalStats {
             }
             StatusType::Crash => {
                 self.num_crashes.count();
+            }
+            StatusType::Amp(path, amp) => {
+                self.num_amps.count();
+                self.best_amp = max(self.best_amp.clone(), amp.clone());
+                let mut path_amps = &mut self.path_amplification;
+                path_amps.entry(path.clone()).and_modify(|old| {
+                    if old.as_factor() < amp.as_factor() {
+                        *old = amp.clone();
+                    }
+                }).or_insert_with(|| amp.clone());
             }
             _ => {}
         }

@@ -68,8 +68,8 @@ impl fmt::Display for StateStats {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            r#"           |    NORMAL: {},   NORMAL_END: {},   ONE_BYTE: {}
-           |       DET: {},    TIMEOUT: {},     UNSOLVABLE: {}  TARGET: {}"#,
+            r#"           | NORMAL: {}, NORMAL_END: {},   ONE_BYTE: {}
+           |    DET: {},    TIMEOUT: {}, UNSOLVABLE: {}, TARGET: {}"#,
             self.normal, self.normal_end, self.one_byte, self.det, self.timeout, self.unsolvable, self.target
         )
     }

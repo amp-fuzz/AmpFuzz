@@ -36,7 +36,7 @@ private:
   IntegerType *Int8Ty;
   IntegerType *Int32Ty;
 
-  Constant *UnfoldBranchFn;
+  FunctionCallee UnfoldBranchFn;
 
 public:
   static char ID;
@@ -66,7 +66,7 @@ bool UnfoldBranch::doInitialization(Module &M) {
   FunctionType *FnTy = FunctionType::get(VoidTy, FnArgs, /*isVarArg=*/false);
   UnfoldBranchFn = M.getOrInsertFunction("__unfold_branch_fn", FnTy);
 
-  if (Function *F = dyn_cast<Function>(UnfoldBranchFn)) {
+  if (Function *F = dyn_cast<Function>(UnfoldBranchFn.getCallee())) {
     F->addAttribute(LLVM_ATTRIBUTE_LIST::FunctionIndex, Attribute::NoUnwind);
   }
   return true;

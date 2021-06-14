@@ -11,17 +11,44 @@ use std::{
 use std::intrinsics::unlikely;
 
 use crate::dyncfg::cfg::{ControlFlowGraph, CmpId};
+use crate::byte_count::AmpByteCount;
+use std::cmp::max;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use itertools::Itertools;
+
+use serde_json::json;
 
 pub type BranchBuf = [u8; BRANCHES_SIZE];
 #[cfg(target_pointer_width = "32")]
 type BranchEntry = u32;
 #[cfg(target_pointer_width = "64")]
 type BranchEntry = u64;
+
 #[cfg(target_pointer_width = "32")]
 const ENTRY_SIZE: usize = 4;
 #[cfg(target_pointer_width = "64")]
 const ENTRY_SIZE: usize = 8;
+
 type BranchBufPlus = [BranchEntry; BRANCHES_SIZE / ENTRY_SIZE];
+pub type PathV = u64;
+
+pub type PathAmplification = std::collections::HashMap::<PathV, AmpByteCount>;
+
+pub trait JsonStr {
+    fn to_json(&self) -> String;
+}
+
+impl JsonStr for PathAmplification {
+    fn to_json(&self) -> String {
+        format!("[{}]", self.iter().map(|(path, amp)| json!({
+                                "path": &format!("{:x}", path),
+                                "factor": amp.as_factor(),
+                                "bytes_in": amp.bytes_in.l7,
+                                "bytes_out": amp.bytes_out.l7
+            }).to_string()).join(","))
+    }
+}
 
 // Map of bit bucket
 // [1], [2], [3], [4, 7], [8, 15], [16, 31], [32, 127], [128, infinity]
@@ -51,6 +78,8 @@ pub struct GlobalBranches {
     tmouts_branches: RwLock<Box<BranchBuf>>,
     crashes_branches: RwLock<Box<BranchBuf>>,
     density: AtomicUsize,
+    path_amplification: RwLock<PathAmplification>,
+    max_amplification: RwLock<AmpByteCount>,
     cfg: RwLock<ControlFlowGraph>,
 }
 
@@ -61,6 +90,8 @@ impl GlobalBranches {
             tmouts_branches: RwLock::new(Box::new([255u8; BRANCHES_SIZE])),
             crashes_branches: RwLock::new(Box::new([255u8; BRANCHES_SIZE])),
             density: AtomicUsize::new(0),
+            path_amplification: RwLock::new(PathAmplification::new()),
+            max_amplification: RwLock::new(AmpByteCount::default()),
             cfg,
         }
     }
@@ -90,6 +121,14 @@ impl Branches {
         self.trace.get_id()
     }
 
+    pub fn get_path_as_hash(&self) -> u64 {
+        let path = self.get_path();
+        let mut def_hasher = DefaultHasher::new();
+        Hash::hash_slice(&path, &mut def_hasher);
+        let exec_path_hash = def_hasher.finish();
+        exec_path_hash
+    }
+
     fn get_path(&self) -> Vec<(usize, u8)> {
         let mut path = Vec::<(usize, u8)>::new();
         let buf_plus: &BranchBufPlus = cast!(&*self.trace);
@@ -106,30 +145,31 @@ impl Branches {
                 }
             }}}
             #[cfg(feature = "unstable")]
-            {
-                if unsafe { unlikely(v > 0) } {
-                    run_loop!()
+                {
+                    if unsafe { unlikely(v > 0) } {
+                        run_loop!()
+                    }
                 }
-            }
             #[cfg(not(feature = "unstable"))]
-            {
-                if v > 0 {
-                    run_loop!()
+                {
+                    if v > 0 {
+                        run_loop!()
+                    }
                 }
-            }
         }
         // debug!("count branch table: {}", path.len());
         path
     }
 
-    pub fn has_new(&mut self, status: StatusType, directed: bool) -> (bool, bool, usize) {
+    pub fn has_new(&mut self, status: &StatusType, directed: bool) -> (bool, bool, usize, bool) {
         let gb_map = match status {
             StatusType::Normal => &self.global.virgin_branches,
             StatusType::Timeout => &self.global.tmouts_branches,
             StatusType::Crash => &self.global.crashes_branches,
-            _ => {
-                return (false, false, 0);
-            },
+            StatusType::Amp(_, _) => &self.global.virgin_branches, // TODO: Introduce separate branches for amps?
+            StatusType::Skip | StatusType::Error => {
+                return (false, false, 0, false);
+            }
         };
         let path = self.get_path();
         let edge_num = path.len();
@@ -137,6 +177,8 @@ impl Branches {
         let mut to_write = vec![];
         let mut has_new_edge = false;
         let mut num_new_edge = 0;
+        let mut has_good_amp = false;
+
         {
             // read only
             let gb_map_read = gb_map.read().unwrap();
@@ -154,7 +196,7 @@ impl Branches {
         }
 
         if num_new_edge > 0 {
-            if status == StatusType::Normal {
+            if matches!(status, StatusType::Normal|StatusType::Amp(_,_)) {
                 // only count virgin branches
                 self.global
                     .density
@@ -162,6 +204,30 @@ impl Branches {
             }
             has_new_edge = true;
         }
+
+        if let StatusType::Amp(path, amp) = status {
+            let mut best_amp = self.global.max_amplification.write().unwrap();
+            let mut path_amps = self.global.path_amplification.write().unwrap();
+            let mut path_amp_entry = path_amps.entry(path.clone());
+
+            // Amp is interesting, if it was achieved on a new path...
+            has_good_amp = has_new_edge;
+
+            //  ...or provides a better factor globally...
+            if amp.as_factor() > best_amp.as_factor() {
+                *best_amp = amp.clone();
+                has_good_amp = true;
+            }
+
+            // ... or locally
+            path_amp_entry.and_modify(|old| {
+                if old.as_factor() < amp.as_factor() {
+                    *old = amp.clone();
+                    has_good_amp = true;
+                }
+            }).or_insert_with(|| amp.clone());
+        }
+
 
         /*
         for (a, b) in to_write.clone().into_iter().tuple_windows() {
@@ -172,7 +238,7 @@ impl Branches {
         */
 
         if to_write.is_empty() {
-            return (false, false, edge_num);
+            return (false, false, edge_num, has_good_amp);
         }
 
         {
@@ -193,7 +259,7 @@ impl Branches {
         }
 
         //(has_new_directed_edge, has_new_edge, edge_num)
-        (if !directed {true} else {has_new_directed_edge}, has_new_edge, edge_num)
+        (if !directed { true } else { has_new_directed_edge }, has_new_edge, edge_num, has_good_amp)
     }
 }
 
@@ -210,7 +276,8 @@ mod tests {
     #[test]
     #[ignore]
     fn branch_empty() {
-        let global_branches = Arc::new(GlobalBranches::new());
+        let cfg = ControlFlowGraph::new();
+        let global_branches = Arc::new(GlobalBranches::new(RwLock::new(cfg)));
         let mut br = Branches::new(global_branches);
         assert_eq!(br.has_new(StatusType::Normal), (false, false, 0));
         assert_eq!(br.has_new(StatusType::Timeout), (false, false, 0));
@@ -220,7 +287,7 @@ mod tests {
     #[test]
     #[ignore]
     fn branch_find_new() {
-        let global_branches = Arc::new(GlobalBranches::new());
+        let global_branches = Arc::new(GlobalBranches::new(RwLock::new(cfg)));
         let mut br = Branches::new(global_branches);
         assert_eq!(br.has_new(StatusType::Normal), (false, false, 0));
         {

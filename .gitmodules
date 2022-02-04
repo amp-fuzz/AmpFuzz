@@ -1,6 +1,6 @@
-[submodule "llvm_mode/libcxx/llvm"]
-	path = llvm_mode/libcxx/llvm
-	url = https://github.com/llvm/llvm-project.git
-[submodule "symcc_amp"]
-	path = symcc_amp
+[submodule "03_symbolic_execution/symcc_amp"]
+	path = 03_symbolic_execution/symcc_amp
 	url = https://github.com/amp-fuzz/symcc_amp.git
+[submodule "llvm"]
+	path = llvm
+	url = https://github.com/llvm/llvm-project.git

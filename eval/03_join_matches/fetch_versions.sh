@@ -15,6 +15,11 @@ TMP_DONE="${TMPDIR}/done"
 TMP_NEW="${TMPDIR}/new"
 TMP_OLD="${TMPDIR}/old"
 
+if [ ! -f ${VERSIONS_FILE} ]
+then
+	touch ${VERSIONS_FILE}
+fi
+
 cut -d':' -f1 ${MATCH_FILE} | sort -u >${TMP_MATCHES}
 if [ -f ${VERSIONS_FILE} ]; then
   cut -d'=' -f1 ${VERSIONS_FILE} | sort -u >${TMP_DONE}
@@ -23,7 +28,7 @@ else
 fi
 
 for pkg in $(comm -23 ${TMP_MATCHES} ${TMP_DONE}); do
-  docker run -ti --entrypoint apt-cache apt-file show ${pkg} | grep '^Version:' | sed 's/Version:[[:space:]]*\(.*\)$/'${pkg}'=\1/g' | head -n1
+  docker run -ti --entrypoint apt-cache apt-file show ${pkg} | grep '^Version:' | sed 's/Version:[[:space:]]*\(.*\)$/'${pkg}'=\1/g' | head -n1 | tr -d \\r
 done >${TMP_NEW}
 
 cp ${VERSIONS_FILE} ${TMP_OLD}

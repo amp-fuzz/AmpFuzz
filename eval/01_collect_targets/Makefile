@@ -1,7 +1,7 @@
 all: matches.txt patterns.csv
 
 
-matches.txt patterns.csv patterns.txt &: refpolicy extract_packages.sh
+matches.txt patterns.csv patterns.txt &: refpolicy extract_packages.sh apt-file-docker/*
 	bash extract_packages.sh
 
 refpolicy: 

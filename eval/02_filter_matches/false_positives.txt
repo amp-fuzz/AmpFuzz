@@ -70,6 +70,7 @@ hplip-data: /usr/share/hplip/base/g.py
 hplip-data: /usr/share/hplip/base/imageprocessing.py
 hplip-data: /usr/share/hplip/base/imagesize.py
 hplip-data: /usr/share/hplip/base/ldif.py
+hplip-data: /usr/share/hplip/base/local.py
 hplip-data: /usr/share/hplip/base/logger.py
 hplip-data: /usr/share/hplip/base/magic.py
 hplip-data: /usr/share/hplip/base/maint.py

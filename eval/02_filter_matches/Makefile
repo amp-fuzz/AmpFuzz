@@ -1,7 +1,7 @@
 all: matches.txt
 
 
-matches.txt: old_matches.txt filter_matches.sh false_positives_manual.txt
+matches.txt: old_matches.txt filter_matches.sh false_positives_manual.txt package-check-docker/*
 	bash filter_matches.sh
 
 old_matches.txt: ../01_collect_targets/matches.txt

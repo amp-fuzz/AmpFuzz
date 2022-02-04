@@ -38,7 +38,6 @@ hplip: /usr/bin/hp-logcapture
 hplip: /usr/bin/hp-makeuri
 hplip: /usr/bin/hp-pkservice
 hplip: /usr/bin/hp-plugin
-hplip: /usr/bin/hp-plugin-ubuntu
 hplip: /usr/bin/hp-probe
 hplip: /usr/bin/hp-query
 hplip: /usr/bin/hp-scan
@@ -60,6 +59,7 @@ hplip-data: /usr/share/hplip/base/g.py
 hplip-data: /usr/share/hplip/base/imageprocessing.py
 hplip-data: /usr/share/hplip/base/imagesize.py
 hplip-data: /usr/share/hplip/base/ldif.py
+hplip-data: /usr/share/hplip/base/local.py
 hplip-data: /usr/share/hplip/base/logger.py
 hplip-data: /usr/share/hplip/base/magic.py
 hplip-data: /usr/share/hplip/base/maint.py
@@ -322,17 +322,9 @@ openvpn: /usr/sbin/openvpn
 printer-driver-hpijs: /usr/bin/hpijs
 pulseaudio: /usr/bin/pulseaudio
 pyzor: /usr/bin/pyzord
-quagga-bgpd: /usr/sbin/bgpd
-quagga-core: /usr/sbin/zebra
-quagga-ospf6d: /usr/sbin/ospf6d
-quagga-ospfd: /usr/sbin/ospfclient
-quagga-ospfd: /usr/sbin/ospfd
-quagga-ripd: /usr/sbin/ripd
-quagga-ripngd: /usr/sbin/ripngd
 ripe-atlas-tools: /usr/bin/ripe-atlas
 ripit: /usr/bin/ripit
 ripmime: /usr/bin/ripmime
-ripoff: /usr/bin/ripoff
 ripper: /usr/bin/ripper
 ripperx: /usr/bin/ripperX
 ripperx: /usr/bin/ripperX_plugin_tester
@@ -352,6 +344,8 @@ spamassassin: /usr/sbin/spamd
 spampd: /usr/sbin/spampd
 squid: /usr/sbin/squid
 squid: /usr/sbin/squid3
+squid-openssl: /usr/sbin/squid
+squid-openssl: /usr/sbin/squid3
 squid-purge: /usr/bin/squid-purge
 squidclient: /usr/bin/squidclient
 squidguard: /usr/bin/squidGuard

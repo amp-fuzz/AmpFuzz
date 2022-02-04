@@ -1,4 +1,4 @@
-FROM ubuntu:20.10
+FROM debian:bullseye
 
 RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
 

@@ -14,7 +14,7 @@ versions.txt: matches.txt fetch_versions.sh
 	bash fetch_versions.sh
 
 by_inst:
-	wget https://popcon.ubuntu.com/by_inst
+	wget https://popcon.debian.org/main/by_inst
 
 .PHONY: clean fullclean
 

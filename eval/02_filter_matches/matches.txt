@@ -38,7 +38,6 @@ openbsd-inetd: /usr/sbin/inetd
 openntpd: /usr/sbin/ntpd
 openvpn: /usr/sbin/openvpn
 pulseaudio: /usr/bin/pulseaudio
-quagga-ripd: /usr/sbin/ripd
 rpcbind: /sbin/rpcbind
 rspamd: /usr/bin/rspamd
 rsyslog: /usr/sbin/rsyslogd
@@ -46,6 +45,8 @@ rwhod: /usr/sbin/rwhod
 samba: /usr/sbin/nmbd
 snmpd: /usr/sbin/snmpd
 snmptrapd: /usr/sbin/snmptrapd
+squid-openssl: /usr/sbin/squid
+squid-openssl: /usr/sbin/squid3
 squid: /usr/sbin/squid
 squid: /usr/sbin/squid3
 squidclient: /usr/bin/squidclient
